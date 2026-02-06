@@ -1,0 +1,160 @@
+---
+# DAYS version: Simple RHDH deployment using the operator
+# No complex Helm/ArgoCD/Janus dependencies
+
+- name: Setting up Red Hat Developer Hub
+  debug:
+    msg: "Deploying Red Hat Developer Hub using the RHDH Operator"
+
+# Create the operator namespace
+- name: Create RHDH operator namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ ocp4_days_workload_rhdh_operator_namespace }}"
+
+# Create the instance namespace
+- name: Create RHDH instance namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ ocp4_days_workload_rhdh_instance_namespace }}"
+
+# Install the RHDH Operator
+- name: Install Red Hat Developer Hub Operator
+  ansible.builtin.include_role:
+    name: install_operator
+  vars:
+    install_operator_action: install
+    install_operator_name: rhdh
+    install_operator_namespace: "{{ ocp4_days_workload_rhdh_operator_namespace }}"
+    install_operator_channel: "{{ ocp4_days_workload_rhdh_channel }}"
+    install_operator_catalog: redhat-operators
+    install_operator_automatic_install_plan_approval: "{{ ocp4_days_workload_rhdh_automatic_install_plan_approval }}"
+    install_operator_starting_csv: "{{ ocp4_days_workload_rhdh_starting_csv }}"
+    install_operator_catalogsource_setup: "{{ ocp4_days_workload_rhdh_use_catalog_snapshot }}"
+    install_operator_catalogsource_name: "{{ ocp4_days_workload_rhdh_catalogsource_name }}"
+    install_operator_catalogsource_namespace: openshift-marketplace
+    install_operator_catalogsource_image: "{{ ocp4_days_workload_rhdh_catalog_snapshot_image }}"
+    install_operator_catalogsource_image_tag: "{{ ocp4_days_workload_rhdh_catalog_snapshot_image_tag }}"
+
+# Wait for operator to be ready
+- name: Wait for RHDH operator to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ ocp4_days_workload_rhdh_operator_namespace }}"
+    label_selectors:
+      - app=rhdh-operator
+  register: r_rhdh_operator
+  until:
+    - r_rhdh_operator.resources | length > 0
+    - r_rhdh_operator.resources[0].status.readyReplicas is defined
+    - r_rhdh_operator.resources[0].status.readyReplicas | int >= 1
+  retries: 30
+  delay: 10
+
+# Create guest auth ConfigMap if enabled
+- name: Create guest auth ConfigMap
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: app-config-rhdh
+        namespace: "{{ ocp4_days_workload_rhdh_instance_namespace }}"
+      data:
+        app-config-rhdh.yaml: |
+          auth:
+            environment: development
+            providers:
+              guest:
+                dangerouslyAllowOutsideDevelopment: true
+  when: ocp4_days_workload_rhdh_enable_guest_auth | bool
+
+# Create the Backstage CR
+- name: Create Red Hat Developer Hub Instance
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: rhdh.redhat.com/v1alpha3
+      kind: Backstage
+      metadata:
+        name: "{{ ocp4_days_workload_rhdh_instance_name }}"
+        namespace: "{{ ocp4_days_workload_rhdh_instance_namespace }}"
+      spec:
+        application:
+          appConfig:
+            configMaps: "{{ [{'name': 'app-config-rhdh'}] if ocp4_days_workload_rhdh_enable_guest_auth else [] }}"
+            mountPath: /opt/app-root/src
+          extraFiles:
+            mountPath: /opt/app-root/src
+          replicas: "{{ ocp4_days_workload_rhdh_replicas }}"
+          route:
+            enabled: true
+        database:
+          enableLocalDb: true
+
+# Wait for Backstage to be ready
+- name: Wait for Backstage deployment to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    namespace: "{{ ocp4_days_workload_rhdh_instance_namespace }}"
+    name: "backstage-{{ ocp4_days_workload_rhdh_instance_name }}"
+  register: r_backstage_deployment
+  until:
+    - r_backstage_deployment.resources | length > 0
+    - r_backstage_deployment.resources[0].status.readyReplicas is defined
+    - r_backstage_deployment.resources[0].status.readyReplicas | int >= 1
+  retries: 30
+  delay: 20
+
+# Get the route URL
+- name: Get Backstage route
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    namespace: "{{ ocp4_days_workload_rhdh_instance_namespace }}"
+    name: "backstage-{{ ocp4_days_workload_rhdh_instance_name }}"
+  register: r_backstage_route
+
+- name: Set Backstage URL fact
+  set_fact:
+    ocp4_days_workload_rhdh_url: "https://{{ r_backstage_route.resources[0].spec.host }}"
+  when: r_backstage_route.resources | length > 0
+
+- name: Print Backstage URL
+  debug:
+    msg: "Red Hat Developer Hub is available at: {{ ocp4_days_workload_rhdh_url | default('URL not available') }}"
+  when: not silent | bool
+
+# Create console link for app launcher
+- name: Create ConsoleLink for Developer Hub
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: console.openshift.io/v1
+      kind: ConsoleLink
+      metadata:
+        name: developer-hub
+      spec:
+        applicationMenu:
+          section: Red Hat Applications
+          imageURL: 'https://raw.githubusercontent.com/jnewsome97/openshift-ops-workshops-showroom/main/content/modules/ROOT/images/rhdh-icon.png'
+        href: "{{ ocp4_days_workload_rhdh_url }}"
+        location: ApplicationMenu
+        text: Red Hat Developer Hub
+  when: r_backstage_route.resources | length > 0
+
+- name: Workload tasks complete
+  debug:
+    msg: "Red Hat Developer Hub deployed successfully"
+  when: not silent | bool

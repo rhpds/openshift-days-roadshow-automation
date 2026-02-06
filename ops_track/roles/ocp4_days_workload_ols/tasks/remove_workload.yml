@@ -1,0 +1,42 @@
+---
+- name: Remove OpenShift Lightspeed workload
+  debug:
+    msg: "Removing OpenShift Lightspeed workload"
+
+# Remove demo namespace
+- name: Remove demo namespace
+  kubernetes.core.k8s:
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ ocp4_days_workload_ols_demo_namespace }}"
+  ignore_errors: true
+
+# Remove the operator using install_operator role
+- name: Remove OpenShift Lightspeed Operator
+  ansible.builtin.include_role:
+    name: install_operator
+  vars:
+    install_operator_action: remove
+    install_operator_name: lightspeed-operator
+    install_operator_namespace: "{{ ocp4_days_workload_ols_namespace }}"
+    install_operator_manage_namespaces:
+      - "{{ ocp4_days_workload_ols_namespace }}"
+    install_operator_channel: "{{ ocp4_days_workload_ols_channel }}"
+    install_operator_catalog: "{{ ocp4_days_workload_ols_catalogsource_name }}"
+    install_operator_catalogsource_setup: "{{ ocp4_days_workload_ols_use_catalog_snapshot }}"
+    install_operator_catalogsource_name: "{{ ocp4_days_workload_ols_catalogsource_name }}"
+
+# Remove the namespace
+- name: Remove OpenShift Lightspeed namespace
+  kubernetes.core.k8s:
+    state: absent
+    api_version: v1
+    kind: Namespace
+    name: "{{ ocp4_days_workload_ols_namespace }}"
+  ignore_errors: true
+
+- name: Remove workload complete
+  debug:
+    msg: "OpenShift Lightspeed workload removed"
+  when: not silent | bool

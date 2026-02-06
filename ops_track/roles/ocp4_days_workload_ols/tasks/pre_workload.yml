@@ -1,0 +1,5 @@
+---
+- name: Pre-workload tasks
+  debug:
+    msg: "Pre-workload tasks complete"
+  when: not silent | bool

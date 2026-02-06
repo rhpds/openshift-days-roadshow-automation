@@ -1,0 +1,17 @@
+---
+namespace: openshift_days
+name: dev_track
+version: 1.0.0
+readme: README.md
+authors:
+  - Josh Newsome <jnewsome@redhat.com>
+description: Ansible collection for OpenShift Days Dev Track Workshop
+license_file: LICENSE
+tags:
+  - openshift
+  - workshop
+  - developer
+  - days
+dependencies:
+  kubernetes.core: ">=2.0.0"
+repository: https://github.com/rhpds/openshift-days-roadshow-automation

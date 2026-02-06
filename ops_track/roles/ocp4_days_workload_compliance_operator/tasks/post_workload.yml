@@ -1,0 +1,26 @@
+---
+- name: Post Workload Tasks
+  ansible.builtin.debug:
+    msg: "Post-Workload tasks complete for Compliance Operator"
+
+- name: Get available Compliance Profiles
+  kubernetes.core.k8s_info:
+    api_version: compliance.openshift.io/v1alpha1
+    kind: Profile
+    namespace: "{{ ocp4_days_workload_compliance_operator_namespace }}"
+  register: r_profiles
+
+- name: Display available profiles
+  ansible.builtin.debug:
+    msg: "Available Compliance Profiles: {{ r_profiles.resources | map(attribute='metadata.name') | list }}"
+  when: r_profiles.resources | length > 0
+
+- name: Print Access Information
+  agnosticd_user_info:
+    msg: "{{ item }}"
+  loop:
+    - ""
+    - "Compliance Operator has been installed in namespace {{ ocp4_days_workload_compliance_operator_namespace }}"
+    - "Available profiles include CIS, NIST, PCI-DSS, and more"
+    - "Use 'oc get profiles -n {{ ocp4_days_workload_compliance_operator_namespace }}' to see all profiles"
+  when: agnosticd_user_info is defined
