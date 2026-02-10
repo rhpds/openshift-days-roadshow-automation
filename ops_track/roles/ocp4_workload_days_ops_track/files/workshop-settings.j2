@@ -8,6 +8,14 @@ GUID={{ guid }}
 ROUTE_SUBDOMAIN={{ route_subdomain }}
 HOME_PATH=/opt/app-root/src
 ENVIRONMENT=Amazon Web Services
+# Getting started modules (content only)
+MODULE_ENABLE_CONCEPTS={{ module_enable_concepts | default(true) | string | lower }}
+MODULE_ENABLE_INSTALL={{ module_enable_install | default(true) | string | lower }}
+# Core operations modules (content only)
+MODULE_ENABLE_APPMGMT={{ module_enable_appmgmt | default(true) | string | lower }}
+MODULE_ENABLE_INGRESS={{ module_enable_ingress | default(true) | string | lower }}
+MODULE_ENABLE_NETSEC={{ module_enable_netsec | default(true) | string | lower }}
+MODULE_ENABLE_DEBUGGING={{ module_enable_debugging | default(true) | string | lower }}
 # Modules with workloads (operator deployed)
 MODULE_ENABLE_VIRT={{ module_enable_virt | default(true) | string | lower }}
 MODULE_ENABLE_ACM={{ module_enable_acm | default(true) | string | lower }}
