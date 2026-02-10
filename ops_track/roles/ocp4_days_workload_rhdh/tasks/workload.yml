@@ -148,7 +148,7 @@
       spec:
         applicationMenu:
           section: Red Hat Applications
-          imageURL: 'https://raw.githubusercontent.com/jnewsome97/openshift-ops-workshops-showroom/main/content/modules/ROOT/images/rhdh-icon.png'
+          imageURL: 'https://raw.githubusercontent.com/jnewsome97/openshift-days-ops-track-showroom-v2/main/content/modules/ROOT/images/rhdh-icon.png'
         href: "{{ ocp4_days_workload_rhdh_url }}"
         location: ApplicationMenu
         text: Red Hat Developer Hub
