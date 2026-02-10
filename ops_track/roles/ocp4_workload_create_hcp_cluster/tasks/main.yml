@@ -1,0 +1,10 @@
+---
+- name: Running workload tasks
+  include_tasks:
+    file: ./workload.yml
+  when: ACTION == "create" or ACTION == "provision"
+
+- name: Running remove tasks
+  include_tasks:
+    file: ./remove_workload.yml
+  when: ACTION == "remove" or ACTION == "destroy"

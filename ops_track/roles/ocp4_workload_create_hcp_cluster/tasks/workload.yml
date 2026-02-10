@@ -1,0 +1,105 @@
+---
+- name: Verify HyperShift operator is running
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: hypershift
+    label_selectors:
+      - app=operator
+  register: r_hypershift_operator
+  retries: 30
+  delay: 10
+  until: r_hypershift_operator.resources | length > 0
+
+- name: Create clusters namespace
+  kubernetes.core.k8s:
+    state: present
+    api_version: v1
+    kind: Namespace
+    name: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+
+- name: Retrieve pull-secret from openshift-config
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: pull-secret
+    namespace: openshift-config
+  register: r_pull_secret
+
+- name: Create pull secret for hosted cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "pullsecret-cluster-{{ ocp4_workload_create_hcp_cluster_name }}"
+        namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: "{{ r_pull_secret.resources[0].data['.dockerconfigjson'] }}"
+
+- name: Create SSH key secret for hosted cluster
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "sshkey-cluster-{{ ocp4_workload_create_hcp_cluster_name }}"
+        namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+      type: Opaque
+      stringData:
+        id_rsa.pub: ""
+
+- name: Create HostedCluster
+  kubernetes.core.k8s:
+    state: present
+    template: hostedcluster.yaml.j2
+
+- name: Wait for HostedCluster to become available
+  kubernetes.core.k8s_info:
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ ocp4_workload_create_hcp_cluster_name }}"
+    namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+  register: r_hosted_cluster
+  retries: "{{ (ocp4_workload_create_hcp_cluster_timeout | int / 10) | int }}"
+  delay: 10
+  until:
+    - r_hosted_cluster.resources | length > 0
+    - r_hosted_cluster.resources[0].status is defined
+    - r_hosted_cluster.resources[0].status.conditions is defined
+    - r_hosted_cluster.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | selectattr('status', 'equalto', 'True') | list | length > 0
+
+- name: Get hosted cluster kubeconfig secret name
+  set_fact:
+    _hcp_kubeconfig_secret: "{{ ocp4_workload_create_hcp_cluster_name }}-admin-kubeconfig"
+
+- name: Retrieve hosted cluster kubeconfig
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ _hcp_kubeconfig_secret }}"
+    namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+  register: r_hcp_kubeconfig
+
+- name: Extract hosted cluster API URL from kubeconfig
+  set_fact:
+    _hcp_api_url: "{{ r_hcp_kubeconfig.resources[0].data.kubeconfig | b64decode | from_yaml | json_query('clusters[0].cluster.server') }}"
+
+- name: Save HCP cluster information as user data
+  agnosticd.core.agnosticd_user_info:
+    data:
+      hcp_cluster_name: "{{ ocp4_workload_create_hcp_cluster_name }}"
+      hcp_cluster_namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+      hcp_kubeconfig_secret: "{{ _hcp_kubeconfig_secret }}"
+      hcp_api_url: "{{ _hcp_api_url }}"
+
+- name: HCP cluster creation complete
+  debug:
+    msg: >-
+      Hosted cluster '{{ ocp4_workload_create_hcp_cluster_name }}'
+      created successfully in namespace '{{ ocp4_workload_create_hcp_cluster_namespace }}'.
+      API URL: {{ _hcp_api_url }}
+  when: not silent | bool
