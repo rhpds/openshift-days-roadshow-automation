@@ -1018,6 +1018,33 @@
   - "  Kubeadmin Password: {{ kubeadmin_password }}"
   - ""
 
+# ==============================================================================
+# OpenShift Lightspeed demo resources
+# Deploys a faulty pod for Lightspeed troubleshooting exercise
+# ==============================================================================
+
+- name: Deploy Lightspeed demo resources
+  when: MODULE_ENABLE_OLS | default('true') | lower == 'true'
+  block:
+    - name: Create Lightspeed demo namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: lightspeed-demo
+
+    - name: Deploy faulty pod for Lightspeed troubleshooting
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('template', 'ols_faulty_pod.yml.j2') }}"
+
+    - name: Lightspeed demo resources deployed
+      debug:
+        msg: "Faulty pod deployed to lightspeed-demo namespace for Lightspeed troubleshooting exercise"
+      when: not silent | default(false) | bool
+
 # Leave this as the last task in the playbook.
 
 - name: workload tasks complete
