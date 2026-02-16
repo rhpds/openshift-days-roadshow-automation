@@ -1024,7 +1024,7 @@
 # ==============================================================================
 
 - name: Deploy Lightspeed demo resources
-  when: MODULE_ENABLE_OLS | default('true') | lower == 'true'
+  when: module_enable_ols | default(true) | bool
   block:
     - name: Create Lightspeed demo namespace
       kubernetes.core.k8s:
