@@ -1167,10 +1167,23 @@
     msg: "{{ verify_result.stdout_lines }}"
   when: enable_workshop_cli_tools | default(true) | bool
 
-- name: Detect terminal container home directory
+- name: Detect terminal container writable home directory
   shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- sh -c 'echo $HOME'
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- sh -c '
+      for d in "$HOME" /home/user /home/wetty /opt/app-root/src /tmp; do
+        if [ -n "$d" ] && [ "$d" != "/" ] && [ -w "$d" ]; then
+          echo "$d"
+          exit 0
+        fi
+      done
+      echo "/tmp"
+    '
   register: terminal_home
+  when: enable_workshop_cli_tools | default(true) | bool
+
+- name: Display detected terminal home
+  debug:
+    msg: "Terminal container writable home: {{ terminal_home.stdout | trim }}"
   when: enable_workshop_cli_tools | default(true) | bool
 
 - name: Create bashrc.d directory in terminal container
