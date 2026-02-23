@@ -1167,103 +1167,25 @@
     msg: "{{ verify_result.stdout_lines }}"
   when: enable_workshop_cli_tools | default(true) | bool
 
-- name: DEBUG - Inspect wetty terminal container environment
+- name: Run workshop CLI tools setup in terminal container
   shell: |
     oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- sh -c '
-      echo "=== CONTAINER USER ==="
-      id
-      echo ""
-      echo "=== HOME ==="
-      echo "HOME=$HOME"
-      echo ""
-      echo "=== PWD ==="
-      pwd
-      echo ""
-      echo "=== ROOT DIRECTORY LISTING ==="
-      ls -la / 2>/dev/null | head -30
-      echo ""
-      echo "=== /home LISTING ==="
-      ls -la /home/ 2>/dev/null || echo "/home does not exist"
-      echo ""
-      echo "=== /opt LISTING ==="
-      ls -la /opt/ 2>/dev/null || echo "/opt does not exist"
-      echo ""
-      echo "=== /opt/app-root LISTING ==="
-      ls -la /opt/app-root/ 2>/dev/null || echo "/opt/app-root does not exist"
-      echo ""
-      echo "=== WRITABLE TEST ==="
-      for d in "$HOME" /home/user /home/wetty /home/node /opt/app-root/src /opt/app-root /tmp; do
-        if [ -d "$d" ] && [ -w "$d" ]; then
-          echo "WRITABLE: $d"
-        elif [ -d "$d" ]; then
-          echo "EXISTS BUT NOT WRITABLE: $d"
-        else
-          echo "DOES NOT EXIST: $d"
-        fi
-      done
-      echo ""
-      echo "=== /etc/passwd entry ==="
-      grep "$(id -u)" /etc/passwd 2>/dev/null || echo "No passwd entry for current UID"
-      echo ""
-      echo "=== ENV ==="
-      env | sort | head -30
+      if [ -x /showroom/repo/.workshop/setup ]; then
+        /showroom/repo/.workshop/setup
+      else
+        echo "No .workshop/setup script found, skipping"
+      fi
     '
-  register: wetty_debug
+  register: cli_setup_result
   ignore_errors: true
   when: enable_workshop_cli_tools | default(true) | bool
 
-- name: Display wetty container debug info
+- name: Display CLI tools setup output
   debug:
-    msg: "{{ wetty_debug.stdout_lines | default(['no output']) }}"
+    msg: "{{ cli_setup_result.stdout_lines | default(['no output']) }}"
   when:
     - enable_workshop_cli_tools | default(true) | bool
-    - wetty_debug is defined
-
-- name: Detect terminal container writable home directory
-  shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- sh -c '
-      for d in "$HOME" /home/user /home/wetty /home/node /opt/app-root/src /opt/app-root /tmp; do
-        if [ -n "$d" ] && [ "$d" != "/" ] && [ -w "$d" ]; then
-          echo "$d"
-          exit 0
-        fi
-      done
-      echo "/tmp"
-    '
-  register: terminal_home
-  ignore_errors: true
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Display detected terminal home
-  debug:
-    msg: "Terminal container writable home: {{ terminal_home.stdout | default('/tmp') | trim }}"
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Create bashrc.d directory in terminal container
-  shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- mkdir -p {{ terminal_home.stdout | default('/tmp') | trim }}/.bashrc.d
-  ignore_errors: true
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Add workshop setup auto-run script to terminal
-  shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- bash -c 'cat > {{ terminal_home.stdout | default('/tmp') | trim }}/.bashrc.d/00-workshop-setup.sh << "EOF"
-    #!/bin/bash
-    # Auto-run .workshop/setup script on first terminal login
-    if [ -x /showroom/repo/.workshop/setup ] && [ ! -f ~/.workshop-setup-complete ]; then
-      echo "Running workshop CLI tools setup..."
-      /showroom/repo/.workshop/setup
-      touch ~/.workshop-setup-complete
-    fi
-    EOF'
-  ignore_errors: true
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Make workshop setup script executable
-  shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- chmod +x {{ terminal_home.stdout | default('/tmp') | trim }}/.bashrc.d/00-workshop-setup.sh
-  ignore_errors: true
-  when: enable_workshop_cli_tools | default(true) | bool
+    - cli_setup_result is defined
 # ==============================================================================
 # End CLI tools auto-install section
 # ==============================================================================
