@@ -1167,16 +1167,22 @@
     msg: "{{ verify_result.stdout_lines }}"
   when: enable_workshop_cli_tools | default(true) | bool
 
+- name: Detect terminal container home directory
+  shell: |
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- sh -c 'echo $HOME'
+  register: terminal_home
+  when: enable_workshop_cli_tools | default(true) | bool
+
 - name: Create bashrc.d directory in terminal container
   shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- mkdir -p /home/lab-user/.bashrc.d
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- mkdir -p {{ terminal_home.stdout | trim }}/.bashrc.d
   register: bashrc_dir_result
   failed_when: bashrc_dir_result.rc != 0 and 'File exists' not in bashrc_dir_result.stderr
   when: enable_workshop_cli_tools | default(true) | bool
 
 - name: Add workshop setup auto-run script to terminal
   shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- bash -c 'cat > /home/lab-user/.bashrc.d/00-workshop-setup.sh << "EOF"
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- bash -c 'cat > {{ terminal_home.stdout | trim }}/.bashrc.d/00-workshop-setup.sh << "EOF"
     #!/bin/bash
     # Auto-run .workshop/setup script on first terminal login
     if [ -x /showroom/repo/.workshop/setup ] && [ ! -f ~/.workshop-setup-complete ]; then
@@ -1189,7 +1195,7 @@
 
 - name: Make workshop setup script executable
   shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- chmod +x /home/lab-user/.bashrc.d/00-workshop-setup.sh
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c wetty -- chmod +x {{ terminal_home.stdout | trim }}/.bashrc.d/00-workshop-setup.sh
   when: enable_workshop_cli_tools | default(true) | bool
 # ==============================================================================
 # End CLI tools auto-install section
