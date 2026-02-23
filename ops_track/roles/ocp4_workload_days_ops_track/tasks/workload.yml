@@ -1,8 +1,113 @@
 ---
-# vim: set ft=ansible
+# Ops Track Workshop Orchestrator
+# Sets up kubeconfig, extracts cluster metadata, configures showroom
 
-# Showroom Cluster Admin Setup (adapted from Homeroom version)
-# Keeps all cluster metadata gathering, swaps deployment for Showroom
+# ==============================================================================
+# KUBECONFIG SETUP
+# ocp_console_embed creates /tmp/kubeconfig-demo — copy to default location
+# so all subsequent oc/shell commands work
+# ==============================================================================
+
+- name: Create .kube directory
+  file:
+    path: "{{ ansible_env.HOME | default('/root') }}/.kube"
+    state: directory
+    mode: '0700'
+
+- name: Check if kubeconfig exists from ocp_console_embed
+  stat:
+    path: /tmp/kubeconfig-demo
+  register: r_kubeconfig_demo
+
+- name: Copy kubeconfig to default location
+  copy:
+    src: /tmp/kubeconfig-demo
+    dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+    remote_src: true
+    mode: '0600'
+  when: r_kubeconfig_demo.stat.exists
+
+- name: Login with token if no kubeconfig file exists
+  command: >
+    oc login {{ openshift_api_url }}
+    --token={{ openshift_cluster_admin_token | default(openshift_api_key) }}
+    --insecure-skip-tls-verify
+  when:
+    - not r_kubeconfig_demo.stat.exists
+    - openshift_api_url is defined
+    - openshift_cluster_admin_token is defined or openshift_api_key is defined
+  ignore_errors: true
+
+# ==============================================================================
+# EXTRACT CLUSTER METADATA
+# ==============================================================================
+
+- name: Set api_url from propagated variable
+  set_fact:
+    api_url: "{{ openshift_api_url | default('') }}"
+  when: openshift_api_url is defined
+
+- name: Extract api_url via oc (fallback)
+  command: oc whoami --show-server
+  register: api_url_r
+  when: api_url is not defined or api_url == ''
+  ignore_errors: true
+
+- name: Set api_url from oc output
+  set_fact:
+    api_url: "{{ api_url_r.stdout | trim }}"
+  when:
+    - api_url_r is defined
+    - api_url_r.rc is defined
+    - api_url_r.rc == 0
+
+- name: Set master_url from propagated variable
+  set_fact:
+    master_url: "{{ openshift_console_url }}"
+  when: openshift_console_url is defined
+
+- name: Extract master_url from console route (fallback)
+  kubernetes.core.k8s_info:
+    kind: Route
+    name: console
+    namespace: openshift-console
+  register: master_url_r
+  retries: 5
+  delay: 10
+  until: master_url_r.resources | length > 0
+  when: master_url is not defined or master_url == ''
+
+- set_fact:
+    master_url: "https://{{ master_url_r.resources[0].spec.host | trim }}"
+  when: master_url is not defined or master_url == ''
+
+- name: Get the default route subdomain of the cluster
+  kubernetes.core.k8s_info:
+    api_version: config.openshift.io/v1
+    kind: Ingress
+    name: cluster
+    namespace: default
+  register: route_subdomain_r
+  retries: 5
+  delay: 10
+  until:
+    - route_subdomain_r.resources[0].spec.domain is defined
+
+- name: Set route subdomain
+  set_fact:
+    route_subdomain: "{{ route_subdomain_r.resources[0].spec.domain }}"
+
+- name: Set bastion_fqdn
+  set_fact:
+    bastion_fqdn: "{{ bastion_ansible_host | default('not-available') }}"
+
+- debug:
+    msg:
+      - "api_url: {{ api_url }}"
+      - "master_url: {{ master_url }}"
+      - "route_subdomain: {{ route_subdomain }}"
+      - "common_admin_password: {{ common_admin_password | default('not-set') }}"
+      - "bastion_fqdn: {{ bastion_fqdn }}"
 
 # ==============================================================================
 # COMPREHENSIVE DEBUG SECTION - Captures full cluster state for troubleshooting
@@ -1015,7 +1120,7 @@
   - "Cluster Information:"
   - "  API URL: {{ api_url }}"
   - "  Console: {{ master_url }}"
-  - "  Kubeadmin Password: {{ kubeadmin_password }}"
+  - "  Admin Password: {{ common_admin_password | default('not-set') }}"
   - ""
 
 # ==============================================================================

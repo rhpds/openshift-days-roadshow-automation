@@ -1,29 +1,8 @@
 ---
-# Main entry point for the workload
-- name: Running Pre Workload Tasks
-  ansible.builtin.include_tasks:
-    file: ./pre_workload.yml
-    apply:
-      become: "{{ become_override | default(omit) }}"
-  when: ACTION == "create" or ACTION == "provision"
+- name: Running workload provision tasks
+  when: ACTION == "provision"
+  ansible.builtin.include_tasks: workload.yml
 
-- name: Running Workload Tasks
-  ansible.builtin.include_tasks:
-    file: ./workload.yml
-    apply:
-      become: "{{ become_override | default(omit) }}"
-  when: ACTION == "create" or ACTION == "provision"
-
-- name: Running Post Workload Tasks
-  ansible.builtin.include_tasks:
-    file: ./post_workload.yml
-    apply:
-      become: "{{ become_override | default(omit) }}"
-  when: ACTION == "create" or ACTION == "provision"
-
-- name: Running Remove Workload Tasks
-  ansible.builtin.include_tasks:
-    file: ./remove_workload.yml
-    apply:
-      become: "{{ become_override | default(omit) }}"
-  when: ACTION == "remove" or ACTION == "destroy"
+- name: Running workload removal tasks
+  when: ACTION == "destroy"
+  ansible.builtin.include_tasks: remove_workload.yml

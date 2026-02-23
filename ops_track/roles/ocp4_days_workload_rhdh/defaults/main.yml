@@ -3,7 +3,6 @@
 # Simple RHDH deployment using the operator with guest auth enabled
 # No complex dependencies - just the operator and a Backstage CR
 
-become_override: false
 silent: false
 
 # Namespace for RHDH operator and instance
