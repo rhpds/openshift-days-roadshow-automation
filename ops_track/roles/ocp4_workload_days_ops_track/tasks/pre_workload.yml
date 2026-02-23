@@ -1,29 +1,75 @@
 ---
-# Implement your Pre Workload deployment tasks here
+# Pre Workload tasks — extract cluster metadata for workshop-settings template
+# Compatible with both agd_v2 (CNV pools) and sandbox (AWS) deployers
 
-- name: extract api_url
+# Ensure oc is authenticated
+# ocp_integration creates /tmp/kubeconfig-demo, copy to default location
+# so all subsequent oc/shell commands work without --kubeconfig flag
+- name: Create .kube directory
+  file:
+    path: "{{ ansible_env.HOME | default('/root') }}/.kube"
+    state: directory
+    mode: '0700'
+
+- name: Check if ocp_integration kubeconfig exists
+  stat:
+    path: /tmp/kubeconfig-demo
+  register: r_kubeconfig_demo
+
+- name: Copy kubeconfig to default location
+  copy:
+    src: /tmp/kubeconfig-demo
+    dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+    remote_src: true
+    mode: '0600'
+  when: r_kubeconfig_demo.stat.exists
+
+- name: Login with token if no kubeconfig file exists
+  command: >
+    oc login {{ openshift_api_url }}
+    --token={{ openshift_cluster_admin_token | default(openshift_api_key) }}
+    --insecure-skip-tls-verify
+  when:
+    - not r_kubeconfig_demo.stat.exists
+    - openshift_api_url is defined
+    - openshift_cluster_admin_token is defined or openshift_api_key is defined
+  ignore_errors: true
+
+# API URL — use propagated variable or fall back to oc command
+- name: Set api_url from propagated variable
+  set_fact:
+    api_url: "{{ openshift_api_url | default('') }}"
+  when: openshift_api_url is defined
+
+- name: Extract api_url via oc (fallback for sandbox deployer)
   command: oc whoami --show-server
   register: api_url_r
+  when: api_url is not defined or api_url == ''
+  ignore_errors: true
 
-- set_fact:
+- name: Set api_url from oc output
+  set_fact:
     api_url: "{{ api_url_r.stdout | trim }}"
+  when:
+    - api_url_r is defined
+    - api_url_r.rc is defined
+    - api_url_r.rc == 0
 
-- name: extract master_url
+# Console URL
+- name: Extract master_url from console route
   kubernetes.core.k8s_info:
-    # required. Use to specify an object model.
-    # Use in conjunction with I(api_version), I(name), and I(namespace) to identify a specific object.
     kind: Route
-    # not required. Use to specify an object name.
-    # Use in conjunction with I(api_version), I(name), and I(namespace) to identify a specific object.
     name: console
-    # not required. Use to specify an object namespace.
-    # Use in conjunction with I(api_version), I(kind) and I(namespace) to identify a specific object.
     namespace: openshift-console
   register: master_url_r
+  retries: 5
+  delay: 10
+  until: master_url_r.resources | length > 0
 
 - set_fact:
     master_url: "https://{{ master_url_r.resources[0].spec.host | trim }}"
 
+# Route subdomain
 - name: Get the default route subdomain of the cluster
   kubernetes.core.k8s_info:
     api_version: config.openshift.io/v1
@@ -40,25 +86,57 @@
   set_fact:
     route_subdomain: "{{ route_subdomain_r.resources[0].spec.domain }}"
 
-- name: cat the kubeadmin-password
-  command: "cat /home/{{ ansible_user }}/cluster-{{ guid }}/auth/kubeadmin-password"
-  register: kubeadmin_password_r
-
-- set_fact:
-    kubeadmin_password: "{{ kubeadmin_password_r.stdout | trim }}"
-
-- name: set bastion_fqdn
+# Admin password — use propagated variable or try kubeadmin file (sandbox only)
+- name: Set kubeadmin_password from common_admin_password
   set_fact:
-    bastion_fqdn: bastion.{{ subdomain_base }}
+    kubeadmin_password: "{{ common_admin_password | default('') }}"
+  when: common_admin_password is defined
+
+- name: Try reading kubeadmin-password from file (sandbox deployer only)
+  command: "cat /home/{{ ansible_user | default('ec2-user') }}/cluster-{{ guid }}/auth/kubeadmin-password"
+  register: kubeadmin_password_r
+  when: kubeadmin_password is not defined or kubeadmin_password == ''
+  ignore_errors: true
+
+- name: Set kubeadmin_password from file
+  set_fact:
+    kubeadmin_password: "{{ kubeadmin_password_r.stdout | trim }}"
+  when:
+    - kubeadmin_password_r is defined
+    - kubeadmin_password_r.rc is defined
+    - kubeadmin_password_r.rc == 0
+    - kubeadmin_password is not defined or kubeadmin_password == ''
+
+- name: Default kubeadmin_password if not found
+  set_fact:
+    kubeadmin_password: "not-available"
+  when: kubeadmin_password is not defined or kubeadmin_password == ''
+
+# Bastion FQDN — use propagated variable or construct from subdomain_base
+- name: Set bastion_fqdn from propagated variable
+  set_fact:
+    bastion_fqdn: "{{ bastion_ansible_host | default('') }}"
+  when: bastion_ansible_host is defined
+
+- name: Set bastion_fqdn from subdomain_base (sandbox fallback)
+  set_fact:
+    bastion_fqdn: "bastion.{{ subdomain_base }}"
+  when:
+    - bastion_fqdn is not defined or bastion_fqdn == ''
+    - subdomain_base is defined
+
+- name: Default bastion_fqdn if not available
+  set_fact:
+    bastion_fqdn: "not-available"
+  when: bastion_fqdn is not defined or bastion_fqdn == ''
 
 - debug:
     msg:
-      - "{{ api_url }}"
-      - "{{ master_url }}"
-      - "{{ route_subdomain }}"
-      - "{{ ocp_username }}"
-      - "{{ bastion_fqdn }}"
-      - "{{ kubeadmin_password }}"
+      - "api_url: {{ api_url }}"
+      - "master_url: {{ master_url }}"
+      - "route_subdomain: {{ route_subdomain }}"
+      - "kubeadmin_password: {{ kubeadmin_password }}"
+      - "bastion_fqdn: {{ bastion_fqdn }}"
 
 # Leave this as the last task in the playbook.
 - name: pre_workload tasks complete

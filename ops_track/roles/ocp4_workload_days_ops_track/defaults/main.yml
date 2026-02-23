@@ -1,6 +1,6 @@
 ---
 become_override: false
-ocp_username: kubeadmin
+ocp_username: admin
 silent: false
 
 _infra_node_replicas: 3
