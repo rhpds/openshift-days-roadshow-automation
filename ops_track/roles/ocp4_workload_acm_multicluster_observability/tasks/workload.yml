@@ -1,5 +1,17 @@
 ---
-# Implement your Workload deployment tasks here
+# Set up temp kubeconfig (moved from pre_workload)
+- name: Ensure temp directory exists
+  file:
+    path: "{{ tmp_dir }}"
+    state: directory
+
+- name: Copy kubeconfig to temp location
+  copy:
+    src: "{{ ansible_env.HOME | default('/root') }}/.kube"
+    dest: "{{ tmp_dir }}"
+    remote_src: true
+  ignore_errors: true
+
 - name: Setting up workload for user
   debug:
     msg: "Setting up workload for user ocp_username = {{ ocp_username }}"
@@ -119,7 +131,12 @@
         state: present
         definition: "{{ lookup('template','./templates/multiclusterobservability-cr.yml.j2') | from_yaml }}"
 
-# Leave this as the last task in the playbook.
+# Clean up temp kubeconfig (moved from post_workload)
+- name: Remove temp kube config
+  file:
+    path: "{{ tmp_kubeconfig }}"
+    state: absent
+
 - name: workload tasks complete
   debug:
     msg: "Workload Tasks completed successfully."

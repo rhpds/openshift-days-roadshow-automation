@@ -1,5 +1,4 @@
 ---
-become_override: false
 silent: false
 
 ocp4_workload_kubernetes_image_puller_operator_channel: stable
