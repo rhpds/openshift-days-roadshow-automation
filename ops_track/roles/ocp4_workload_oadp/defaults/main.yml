@@ -1,5 +1,5 @@
 ---
-ocp_username: opentlc-mgr
+ocp_username: admin
 silent: false
 
 # Channel to use for the Kubernetes OADP Operator subscription

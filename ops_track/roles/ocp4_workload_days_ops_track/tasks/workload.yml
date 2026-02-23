@@ -97,10 +97,6 @@
   set_fact:
     route_subdomain: "{{ route_subdomain_r.resources[0].spec.domain }}"
 
-- name: Set admin_password from common_admin_password
-  set_fact:
-    admin_password: "{{ common_admin_password | default('not-available') }}"
-
 - name: Set bastion_fqdn
   set_fact:
     bastion_fqdn: "{{ bastion_ansible_host | default('not-available') }}"
@@ -110,7 +106,7 @@
       - "api_url: {{ api_url }}"
       - "master_url: {{ master_url }}"
       - "route_subdomain: {{ route_subdomain }}"
-      - "admin_password: {{ admin_password }}"
+      - "common_admin_password: {{ common_admin_password | default('not-set') }}"
       - "bastion_fqdn: {{ bastion_fqdn }}"
 
 # ==============================================================================
@@ -1124,7 +1120,7 @@
   - "Cluster Information:"
   - "  API URL: {{ api_url }}"
   - "  Console: {{ master_url }}"
-  - "  Admin Password: {{ admin_password }}"
+  - "  Admin Password: {{ common_admin_password | default('not-set') }}"
   - ""
 
 # ==============================================================================
