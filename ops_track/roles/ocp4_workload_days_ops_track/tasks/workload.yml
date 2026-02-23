@@ -14,29 +14,73 @@
     state: directory
     mode: '0700'
 
-- name: Check if kubeconfig exists from ocp_console_embed
+- name: Check for existing kubeconfig files
   stat:
-    path: /tmp/kubeconfig-demo
-  register: r_kubeconfig_demo
+    path: "{{ item }}"
+  loop:
+    - /tmp/kubeconfig-demo
+    - "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+  register: r_kubeconfig_check
 
-- name: Copy kubeconfig to default location
+- name: Set kubeconfig found facts
+  set_fact:
+    kubeconfig_demo_exists: "{{ r_kubeconfig_check.results[0].stat.exists }}"
+    kubeconfig_default_exists: "{{ r_kubeconfig_check.results[1].stat.exists }}"
+
+- name: Copy kubeconfig-demo to default location
   copy:
     src: /tmp/kubeconfig-demo
     dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
     remote_src: true
     mode: '0600'
-  when: r_kubeconfig_demo.stat.exists
+  when: kubeconfig_demo_exists | bool
 
-- name: Login with token if no kubeconfig file exists
-  command: >
-    oc login {{ openshift_api_url }}
-    --token={{ openshift_cluster_admin_token | default(openshift_api_key) }}
-    --insecure-skip-tls-verify
+- name: Check KUBECONFIG environment variable
+  set_fact:
+    kubeconfig_env: "{{ lookup('env', 'KUBECONFIG') }}"
+
+- name: Copy KUBECONFIG env file to default location
+  copy:
+    src: "{{ kubeconfig_env }}"
+    dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+    remote_src: true
+    mode: '0600'
   when:
-    - not r_kubeconfig_demo.stat.exists
+    - not kubeconfig_demo_exists | bool
+    - not kubeconfig_default_exists | bool
+    - kubeconfig_env | length > 0
+
+- name: Check if kubeconfig exists now
+  stat:
+    path: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+  register: r_kubeconfig_final
+
+- name: Generate kubeconfig for oc CLI from deployer credentials
+  copy:
+    dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+    mode: '0600'
+    content: |
+      apiVersion: v1
+      kind: Config
+      clusters:
+      - cluster:
+          insecure-skip-tls-verify: true
+          server: {{ openshift_api_url }}
+        name: default
+      contexts:
+      - context:
+          cluster: default
+          user: admin
+        name: default
+      current-context: default
+      users:
+      - name: admin
+        user:
+          token: {{ openshift_cluster_admin_token | default(openshift_api_key) }}
+  when:
+    - not r_kubeconfig_final.stat.exists
     - openshift_api_url is defined
     - openshift_cluster_admin_token is defined or openshift_api_key is defined
-  ignore_errors: true
 
 # ==============================================================================
 # EXTRACT CLUSTER METADATA
@@ -111,11 +155,22 @@
 
 # ==============================================================================
 # COMPREHENSIVE DEBUG SECTION - Captures full cluster state for troubleshooting
+# Non-fatal: entire block uses ignore_errors so diagnostics never block deployment
 # ==============================================================================
 
 - name: "DEBUG === CLUSTER OVERVIEW ==="
   debug:
     msg: "Gathering comprehensive cluster diagnostics..."
+
+- name: Verify oc CLI has working kubeconfig
+  command: oc whoami
+  register: oc_whoami_check
+  ignore_errors: true
+
+- name: Skip debug diagnostics if oc CLI has no auth
+  debug:
+    msg: "WARNING: oc CLI has no working kubeconfig, skipping cluster diagnostics"
+  when: oc_whoami_check.rc != 0
 
 - name: DEBUG - Cluster version and status
   shell: |
@@ -125,10 +180,12 @@
     echo "=== CLUSTER OPERATORS STATUS ==="
     oc get co | grep -E "NAME|False|Unknown" || oc get co
   register: debug_cluster_version
+  ignore_errors: true
 
 - name: Display cluster version
   debug:
     msg: "{{ debug_cluster_version.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Node status and instance types
   shell: |
@@ -138,10 +195,12 @@
     echo "=== NODE DETAILS (instance types, zones) ==="
     oc get nodes -o custom-columns=NAME:.metadata.name,STATUS:.status.conditions[-1].type,INSTANCE:.metadata.labels.node\\.kubernetes\\.io/instance-type,ZONE:.metadata.labels.topology\\.kubernetes\\.io/zone,ROLES:.metadata.labels.node-role\\.kubernetes\\.io/worker
   register: debug_nodes
+  ignore_errors: true
 
 - name: Display node status
   debug:
     msg: "{{ debug_nodes.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Storage classes available
   shell: |
@@ -152,10 +211,12 @@
     oc get sc -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}'
     echo ""
   register: debug_storage_classes
+  ignore_errors: true
 
 - name: Display storage classes
   debug:
     msg: "{{ debug_storage_classes.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - All installed operators
   shell: |
@@ -165,10 +226,12 @@
     echo "=== ALL CSVs ==="
     oc get csv -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,PHASE:.status.phase | head -50
   register: debug_operators
+  ignore_errors: true
 
 - name: Display operators
   debug:
     msg: "{{ debug_operators.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - ODF/OpenShift Data Foundation status
   shell: |
@@ -184,10 +247,12 @@
     echo "=== ODF CSVs ==="
     oc get csv -n openshift-storage 2>/dev/null || echo "No CSVs in openshift-storage"
   register: debug_odf
+  ignore_errors: true
 
 - name: Display ODF status
   debug:
     msg: "{{ debug_odf.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - OpenShift Virtualization (KubeVirt) status
   shell: |
@@ -203,10 +268,12 @@
     echo "=== CNV CSVs ==="
     oc get csv -n openshift-cnv 2>/dev/null || echo "No CSVs in openshift-cnv"
   register: debug_cnv
+  ignore_errors: true
 
 - name: Display CNV status
   debug:
     msg: "{{ debug_cnv.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - ACM/Multicluster Engine status
   shell: |
@@ -225,10 +292,12 @@
     echo "=== ACM CSVs ==="
     oc get csv -n open-cluster-management 2>/dev/null | head -20 || echo "No CSVs in open-cluster-management"
   register: debug_acm
+  ignore_errors: true
 
 - name: Display ACM status
   debug:
     msg: "{{ debug_acm.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - MetalLB status
   shell: |
@@ -244,10 +313,12 @@
     echo "=== L2 ADVERTISEMENTS ==="
     oc get l2advertisement -A 2>/dev/null || echo "No L2Advertisements found"
   register: debug_metallb
+  ignore_errors: true
 
 - name: Display MetalLB status
   debug:
     msg: "{{ debug_metallb.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - HCP/Hypershift readiness
   shell: |
@@ -264,10 +335,12 @@
     oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.routeAdmission.wildcardPolicy}' 2>/dev/null || echo "Not set"
     echo ""
   register: debug_hcp
+  ignore_errors: true
 
 - name: Display HCP readiness
   debug:
     msg: "{{ debug_hcp.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Block devices on first worker (for storage debugging)
   shell: |
@@ -284,10 +357,12 @@
       echo "No worker nodes found"
     fi
   register: debug_block_devices
+  ignore_errors: true
 
 - name: Display block devices
   debug:
     msg: "{{ debug_block_devices.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Pending/Failed pods across cluster
   shell: |
@@ -297,10 +372,12 @@
     echo "=== RECENT EVENTS (warnings/errors) ==="
     oc get events -A --field-selector type!=Normal --sort-by='.lastTimestamp' 2>/dev/null | tail -20 || echo "No warning events"
   register: debug_pods
+  ignore_errors: true
 
 - name: Display pod issues
   debug:
     msg: "{{ debug_pods.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - PVCs and PVs status
   shell: |
@@ -310,10 +387,12 @@
     echo "=== PV SUMMARY ==="
     oc get pv 2>/dev/null | head -20 || echo "No PVs found"
   register: debug_pvcs
+  ignore_errors: true
 
 - name: Display PVC status
   debug:
     msg: "{{ debug_pvcs.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - All Subscriptions (detect conflicts)
   shell: |
@@ -323,10 +402,12 @@
     echo "=== SUBSCRIPTIONS WITH ISSUES ==="
     oc get subscriptions.operators.coreos.com -A -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | select(.type=="ResolutionFailed" and .status=="True")) | "\(.metadata.namespace)/\(.metadata.name): \(.status.conditions[] | select(.type=="ResolutionFailed") | .message)"' 2>/dev/null | head -10 || echo "No subscription issues found"
   register: debug_subscriptions
+  ignore_errors: true
 
 - name: Display subscriptions
   debug:
     msg: "{{ debug_subscriptions.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - All CatalogSources
   shell: |
@@ -336,10 +417,12 @@
     echo "=== UNHEALTHY CATALOG SOURCES ==="
     oc get catalogsource -A -o json 2>/dev/null | jq -r '.items[] | select(.status.connectionState.lastObservedState != "READY") | "\(.metadata.namespace)/\(.metadata.name): \(.status.connectionState.lastObservedState // "UNKNOWN")"' 2>/dev/null || echo "All catalog sources healthy"
   register: debug_catalogsources
+  ignore_errors: true
 
 - name: Display catalog sources
   debug:
     msg: "{{ debug_catalogsources.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Pipelines/Tekton status
   shell: |
@@ -355,10 +438,12 @@
     echo "=== TEKTON PIPELINES ==="
     oc get tektonpipeline -A 2>/dev/null || echo "No TektonPipeline found"
   register: debug_pipelines
+  ignore_errors: true
 
 - name: Display Pipelines status
   debug:
     msg: "{{ debug_pipelines.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - GitOps/ArgoCD status
   shell: |
@@ -374,10 +459,12 @@
     echo "=== GITOPS NAMESPACE ==="
     oc get all -n openshift-gitops 2>/dev/null | head -15 || echo "openshift-gitops namespace not found"
   register: debug_gitops
+  ignore_errors: true
 
 - name: Display GitOps status
   debug:
     msg: "{{ debug_gitops.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Serverless/Knative status
   shell: |
@@ -393,10 +480,12 @@
     echo "=== KNATIVE EVENTING ==="
     oc get knativeeventing -A 2>/dev/null || echo "No KnativeEventing found"
   register: debug_serverless
+  ignore_errors: true
 
 - name: Display Serverless status
   debug:
     msg: "{{ debug_serverless.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Developer Hub/Backstage status
   shell: |
@@ -409,10 +498,12 @@
     echo "=== RHDH PODS ==="
     oc get pods -A 2>/dev/null | grep -i "backstage\|rhdh\|developer-hub" || echo "No RHDH pods found"
   register: debug_rhdh
+  ignore_errors: true
 
 - name: Display RHDH status
   debug:
     msg: "{{ debug_rhdh.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - RHACS/Stackrox status
   shell: |
@@ -428,10 +519,12 @@
     echo "=== SECURED CLUSTERS ==="
     oc get securedcluster -A 2>/dev/null || echo "No SecuredCluster found"
   register: debug_rhacs
+  ignore_errors: true
 
 - name: Display RHACS status
   debug:
     msg: "{{ debug_rhacs.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - OADP/Velero status
   shell: |
@@ -447,10 +540,12 @@
     echo "=== BACKUP STORAGE LOCATIONS ==="
     oc get backupstoragelocation -A 2>/dev/null || echo "No BSL found"
   register: debug_oadp
+  ignore_errors: true
 
 - name: Display OADP status
   debug:
     msg: "{{ debug_oadp.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Showroom status
   shell: |
@@ -463,10 +558,12 @@
     echo "=== SHOWROOM ROUTES ==="
     oc get routes -A 2>/dev/null | grep -i showroom || echo "No Showroom routes"
   register: debug_showroom
+  ignore_errors: true
 
 - name: Display Showroom status
   debug:
     msg: "{{ debug_showroom.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - InstallPlans (detect stuck installs)
   shell: |
@@ -476,10 +573,12 @@
     echo "=== RECENT INSTALLPLANS ==="
     oc get installplan -A --sort-by='.metadata.creationTimestamp' 2>/dev/null | tail -15 || echo "No InstallPlans"
   register: debug_installplans
+  ignore_errors: true
 
 - name: Display InstallPlans
   debug:
     msg: "{{ debug_installplans.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Resource usage summary
   shell: |
@@ -492,10 +591,12 @@
     echo "=== TOTAL POD COUNT ==="
     oc get pods -A --no-headers 2>/dev/null | wc -l || echo "Unknown"
   register: debug_resources
+  ignore_errors: true
 
 - name: Display resource usage
   debug:
     msg: "{{ debug_resources.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Cert-manager status (first operator in chain)
   shell: |
@@ -517,10 +618,12 @@
     echo "=== CLUSTER ISSUER DETAILS ==="
     oc get clusterissuer -o yaml 2>/dev/null | grep -A20 "status:" | head -30 || echo "No ClusterIssuer status"
   register: debug_certmanager
+  ignore_errors: true
 
 - name: Display cert-manager status
   debug:
     msg: "{{ debug_certmanager.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Certificate issuance status (for troubleshooting Let's Encrypt)
   shell: |
@@ -556,10 +659,12 @@
     echo "=== CERT-MANAGER CONTROLLER LOGS (last 50 lines) ==="
     oc logs -n cert-manager -l app.kubernetes.io/component=controller --tail=50 2>/dev/null || echo "No controller logs"
   register: debug_certificates
+  ignore_errors: true
 
 - name: Display certificate issuance status
   debug:
     msg: "{{ debug_certificates.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - OperatorGroups (detect conflicts)
   shell: |
@@ -569,10 +674,12 @@
     echo "=== NAMESPACES WITH MULTIPLE OPERATORGROUPS (conflict!) ==="
     oc get operatorgroup -A -o json 2>/dev/null | jq -r '[.items[] | {ns: .metadata.namespace}] | group_by(.ns) | .[] | select(length > 1) | .[0].ns' 2>/dev/null || echo "No conflicts"
   register: debug_operatorgroups
+  ignore_errors: true
 
 - name: Display OperatorGroups
   debug:
     msg: "{{ debug_operatorgroups.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Minio status (S3 for RHDH)
   shell: |
@@ -585,10 +692,12 @@
     echo "=== MINIO ROUTES ==="
     oc get routes -n ic-shared-minio 2>/dev/null || echo "No Minio routes"
   register: debug_minio
+  ignore_errors: true
 
 - name: Display Minio status
   debug:
     msg: "{{ debug_minio.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - Web Terminal status
   shell: |
@@ -601,10 +710,12 @@
     echo "=== WEB TERMINAL NAMESPACE ==="
     oc get all -n openshift-terminal 2>/dev/null | head -10 || echo "openshift-terminal namespace not found"
   register: debug_webterminal
+  ignore_errors: true
 
 - name: Display Web Terminal status
   debug:
     msg: "{{ debug_webterminal.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: DEBUG - GitLab status (for RHDH)
   shell: |
@@ -614,10 +725,12 @@
     echo "=== GITLAB ROUTES ==="
     oc get routes -A 2>/dev/null | grep -i gitlab || echo "No GitLab routes"
   register: debug_gitlab
+  ignore_errors: true
 
 - name: Display GitLab status
   debug:
     msg: "{{ debug_gitlab.stdout_lines }}"
+  when: oc_whoami_check.rc == 0
 
 - name: "DEBUG === END CLUSTER OVERVIEW ==="
   debug:
