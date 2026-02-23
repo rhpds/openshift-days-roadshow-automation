@@ -8,56 +8,62 @@
 # so all subsequent oc/shell commands work
 # ==============================================================================
 
-- name: Create .kube directory
+- name: Detect shell HOME directory for oc CLI
+  shell: echo $HOME
+  register: shell_home
+  changed_when: false
+
+- name: Create .kube directories for all possible HOME paths
   file:
-    path: "{{ ansible_env.HOME | default('/root') }}/.kube"
+    path: "{{ item }}/.kube"
     state: directory
     mode: '0700'
+  loop:
+    - "{{ ansible_env.HOME | default('/root') }}"
+    - "{{ shell_home.stdout | trim }}"
+    - /root
+    - /home/runner
+  loop_control:
+    label: "{{ item }}/.kube"
+  ignore_errors: true
 
-- name: Check for existing kubeconfig files
+- name: Check for existing kubeconfig sources
   stat:
     path: "{{ item }}"
   loop:
     - /tmp/kubeconfig-demo
-    - "{{ ansible_env.HOME | default('/root') }}/.kube/config"
-  register: r_kubeconfig_check
+    - "{{ lookup('env', 'KUBECONFIG') | default('/dev/null', true) }}"
+  register: r_kubeconfig_sources
 
-- name: Set kubeconfig found facts
+- name: Set kubeconfig source path
   set_fact:
-    kubeconfig_demo_exists: "{{ r_kubeconfig_check.results[0].stat.exists }}"
-    kubeconfig_default_exists: "{{ r_kubeconfig_check.results[1].stat.exists }}"
+    kubeconfig_source: >-
+      {% if r_kubeconfig_sources.results[0].stat.exists | default(false) %}
+      /tmp/kubeconfig-demo
+      {% elif lookup('env', 'KUBECONFIG') | length > 0 and r_kubeconfig_sources.results[1].stat.exists | default(false) %}
+      {{ lookup('env', 'KUBECONFIG') }}
+      {% else %}
+      {% endif %}
 
-- name: Copy kubeconfig-demo to default location
+- name: Copy existing kubeconfig to all HOME paths
   copy:
-    src: /tmp/kubeconfig-demo
-    dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+    src: "{{ kubeconfig_source | trim }}"
+    dest: "{{ item }}/.kube/config"
     remote_src: true
     mode: '0600'
-  when: kubeconfig_demo_exists | bool
+  loop:
+    - "{{ ansible_env.HOME | default('/root') }}"
+    - "{{ shell_home.stdout | trim }}"
+    - /root
+    - /home/runner
+  loop_control:
+    label: "{{ item }}/.kube/config"
+  when: kubeconfig_source | trim | length > 0
+  ignore_errors: true
 
-- name: Check KUBECONFIG environment variable
-  set_fact:
-    kubeconfig_env: "{{ lookup('env', 'KUBECONFIG') }}"
-
-- name: Copy KUBECONFIG env file to default location
+- name: Generate kubeconfig from deployer credentials
   copy:
-    src: "{{ kubeconfig_env }}"
-    dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
-    remote_src: true
-    mode: '0600'
-  when:
-    - not kubeconfig_demo_exists | bool
-    - not kubeconfig_default_exists | bool
-    - kubeconfig_env | length > 0
-
-- name: Check if kubeconfig exists now
-  stat:
-    path: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
-  register: r_kubeconfig_final
-
-- name: Generate kubeconfig for oc CLI from deployer credentials
-  copy:
-    dest: "{{ ansible_env.HOME | default('/root') }}/.kube/config"
+    dest: "{{ item }}/.kube/config"
     mode: '0600'
     content: |
       apiVersion: v1
@@ -77,10 +83,18 @@
       - name: admin
         user:
           token: {{ openshift_cluster_admin_token | default(openshift_api_key) }}
+  loop:
+    - "{{ ansible_env.HOME | default('/root') }}"
+    - "{{ shell_home.stdout | trim }}"
+    - /root
+    - /home/runner
+  loop_control:
+    label: "{{ item }}/.kube/config"
   when:
-    - not r_kubeconfig_final.stat.exists
+    - kubeconfig_source | trim | length == 0
     - openshift_api_url is defined
     - openshift_cluster_admin_token is defined or openshift_api_key is defined
+  ignore_errors: true
 
 # ==============================================================================
 # EXTRACT CLUSTER METADATA
