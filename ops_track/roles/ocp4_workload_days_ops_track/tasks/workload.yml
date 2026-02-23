@@ -861,17 +861,6 @@
             }
           }
         ]
-      },
-      {
-        "op": "add",
-        "path": "/spec/template/spec/containers/2/envFrom",
-        "value": [
-          {
-            "configMapRef": {
-              "name": "workshop-vars"
-            }
-          }
-        ]
       }
     ]'
   register: patch_result
@@ -898,7 +887,7 @@
     oc patch deployment showroom -n {{ showroom_namespace }} --type=json -p='[
       {
         "op": "add",
-        "path": "/spec/template/spec/containers/2/volumeMounts/-",
+        "path": "/spec/template/spec/containers/1/volumeMounts/-",
         "value": {
           "name": "showroom",
           "mountPath": "/showroom",
