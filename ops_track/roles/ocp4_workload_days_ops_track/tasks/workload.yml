@@ -1109,7 +1109,7 @@
   register: Route
 
 - name: Provide workshop information
-  agnosticd_user_info:
+  agnosticd.core.agnosticd_user_info:
     msg: "{{ item }}"
   loop:
   - ""
