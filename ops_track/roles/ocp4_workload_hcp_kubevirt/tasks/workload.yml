@@ -1,8 +1,7 @@
 ---
-# Implement your Workload deployment tasks here
-- name: Setting up workload for user
+- name: Setting up HCP KubeVirt workload
   ansible.builtin.debug:
-    msg: "Setting up workload for user ocp_username = {{ ocp_username }}"
+    msg: "Patching IngressController for wildcard routes"
 
 - name: Patch the IngressController to allow wildcard routes
   kubernetes.core.k8s:
