@@ -19,6 +19,15 @@ spec:
     persistence:
       persistentVolumeClaim:
         claimName: stackrox-db
+{% if ocp4_workload_rhacs_central_storage_class is defined %}
+        storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
+{% endif %}
+    db:
+      persistence:
+        persistentVolumeClaim:
+{% if ocp4_workload_rhacs_central_storage_class is defined %}
+          storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
+{% endif %}
   egress:
     connectivityPolicy: Online
   scanner:
@@ -27,9 +36,21 @@ spec:
         autoScaling: Disabled
         replicas: 1
     scannerComponent: Enabled
+    db:
+      persistence:
+        persistentVolumeClaim:
+{% if ocp4_workload_rhacs_central_storage_class is defined %}
+          storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
+{% endif %}
 {% if ocp4_workload_rhacs_enable_central_scanner_v4 | bool %}
 {% if ocp4_workload_rhacs_install_operator_channel.split('-')[1] | float >= 4.4 %}
   scannerV4:
+    db:
+      persistence:
+        persistentVolumeClaim:
+{% if ocp4_workload_rhacs_central_storage_class is defined %}
+          storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
+{% endif %}
     matcher:
       resources:
         limits:
