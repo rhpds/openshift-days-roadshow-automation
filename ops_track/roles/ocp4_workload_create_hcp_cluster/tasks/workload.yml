@@ -1,4 +1,74 @@
 ---
+# ==============================================================================
+# DEBUG - Pre-flight checks for HCP cluster creation
+# ==============================================================================
+- name: DEBUG - HCP cluster creation input variables
+  debug:
+    msg:
+      - "=== HCP CLUSTER CONFIG ==="
+      - "cluster_name: {{ ocp4_workload_create_hcp_cluster_name }}"
+      - "namespace: {{ ocp4_workload_create_hcp_cluster_namespace }}"
+      - "release_image: {{ ocp4_workload_create_hcp_cluster_release_image }}"
+      - "etcd_storage_class: {{ ocp4_workload_create_hcp_cluster_etcd_storage_class }}"
+      - "etcd_storage_size: {{ ocp4_workload_create_hcp_cluster_etcd_storage_size }}"
+      - "network_cidr: {{ ocp4_workload_create_hcp_cluster_network_cidr }}"
+      - "service_network_cidr: {{ ocp4_workload_create_hcp_cluster_service_network_cidr }}"
+      - "base_domain: {{ ocp4_workload_create_hcp_cluster_base_domain }}"
+      - "availability: {{ ocp4_workload_create_hcp_cluster_availability }}"
+      - "timeout: {{ ocp4_workload_create_hcp_cluster_timeout }}"
+  ignore_errors: true
+
+- name: DEBUG - Verify etcd storage class exists
+  kubernetes.core.k8s_info:
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+    name: "{{ ocp4_workload_create_hcp_cluster_etcd_storage_class }}"
+  register: debug_storage_class
+  ignore_errors: true
+
+- name: DEBUG - Display storage class check
+  debug:
+    msg:
+      - "=== STORAGE CLASS CHECK ==="
+      - "requested: {{ ocp4_workload_create_hcp_cluster_etcd_storage_class }}"
+      - "exists: {{ debug_storage_class.resources | default([]) | length > 0 }}"
+  when: debug_storage_class is defined
+  ignore_errors: true
+
+- name: DEBUG - List all available storage classes
+  kubernetes.core.k8s_info:
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+  register: debug_all_sc
+  ignore_errors: true
+
+- name: DEBUG - Display all storage classes
+  debug:
+    msg:
+      - "=== ALL STORAGE CLASSES ==="
+      - "{{ debug_all_sc.resources | default([]) | map(attribute='metadata') | map(attribute='name') | list }}"
+  when: debug_all_sc is defined
+  ignore_errors: true
+
+- name: DEBUG - Check MetalLB IP address pool
+  kubernetes.core.k8s_info:
+    api_version: metallb.io/v1beta1
+    kind: IPAddressPool
+  register: debug_ip_pool
+  ignore_errors: true
+
+- name: DEBUG - Display MetalLB IP pools
+  debug:
+    msg:
+      - "=== METALLB IP POOLS ==="
+      - "count: {{ debug_ip_pool.resources | default([]) | length }}"
+      - "pools: {{ debug_ip_pool.resources | default([]) | map(attribute='metadata') | map(attribute='name') | list }}"
+  when: debug_ip_pool is defined
+  ignore_errors: true
+
+# ==============================================================================
+# HCP Cluster Creation
+# ==============================================================================
 - name: Verify HyperShift operator is running
   kubernetes.core.k8s_info:
     api_version: v1
@@ -56,6 +126,47 @@
   kubernetes.core.k8s:
     state: present
     template: hostedcluster.yaml.j2
+
+- name: DEBUG - Check etcd PVC status after HostedCluster creation
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: PersistentVolumeClaim
+    namespace: "clusters-{{ ocp4_workload_create_hcp_cluster_name }}"
+  register: debug_etcd_pvcs
+  ignore_errors: true
+
+- name: DEBUG - Display etcd PVC status
+  debug:
+    msg:
+      - "=== ETCD PVCs ==="
+      - "namespace: clusters-{{ ocp4_workload_create_hcp_cluster_name }}"
+      - "count: {{ debug_etcd_pvcs.resources | default([]) | length }}"
+      - "pvcs: {{ debug_etcd_pvcs.resources | default([]) | map(attribute='metadata') | map(attribute='name') | list }}"
+      - "phases: {{ debug_etcd_pvcs.resources | default([]) | map(attribute='status') | map(attribute='phase', default='Unknown') | list }}"
+  when: debug_etcd_pvcs is defined
+  ignore_errors: true
+
+- name: DEBUG - Check HostedCluster initial conditions
+  kubernetes.core.k8s_info:
+    api_version: hypershift.openshift.io/v1beta1
+    kind: HostedCluster
+    name: "{{ ocp4_workload_create_hcp_cluster_name }}"
+    namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+  register: debug_hc_initial
+  ignore_errors: true
+
+- name: DEBUG - Display HostedCluster initial conditions
+  debug:
+    msg:
+      - "=== HOSTEDCLUSTER INITIAL STATUS ==="
+      - "{{ debug_hc_initial.resources[0].status.conditions | default([]) | map(attribute='type') | zip(debug_hc_initial.resources[0].status.conditions | default([]) | map(attribute='status')) | map('join', '=') | list }}"
+      - "=== PROBLEM CONDITIONS ==="
+      - "{{ debug_hc_initial.resources[0].status.conditions | default([]) | selectattr('status', 'equalto', 'False') | map(attribute='type') | zip(debug_hc_initial.resources[0].status.conditions | default([]) | selectattr('status', 'equalto', 'False') | map(attribute='message')) | map('join', ': ') | list }}"
+  when:
+    - debug_hc_initial is defined
+    - debug_hc_initial.resources | default([]) | length > 0
+    - debug_hc_initial.resources[0].status is defined
+  ignore_errors: true
 
 - name: Wait for HostedCluster to become available
   kubernetes.core.k8s_info:
