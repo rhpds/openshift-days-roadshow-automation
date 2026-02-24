@@ -2,6 +2,23 @@
 # DAYS version: Simple RHDH deployment using the operator
 # No complex Helm/ArgoCD/Janus dependencies
 
+# ==============================================================================
+# DEBUG - RHDH pre-flight checks
+# ==============================================================================
+- name: DEBUG - RHDH input variables
+  debug:
+    msg:
+      - "=== RHDH CONFIG ==="
+      - "operator_namespace: {{ ocp4_days_workload_rhdh_operator_namespace }}"
+      - "instance_namespace: {{ ocp4_days_workload_rhdh_instance_namespace }}"
+      - "instance_name: {{ ocp4_days_workload_rhdh_instance_name }}"
+      - "channel: {{ ocp4_days_workload_rhdh_channel }}"
+      - "replicas: {{ ocp4_days_workload_rhdh_replicas }}"
+      - "enable_guest_auth: {{ ocp4_days_workload_rhdh_enable_guest_auth }}"
+      - "use_catalog_snapshot: {{ ocp4_days_workload_rhdh_use_catalog_snapshot }}"
+      - "starting_csv: {{ ocp4_days_workload_rhdh_starting_csv | default('') }}"
+  ignore_errors: true
+
 - name: Setting up Red Hat Developer Hub
   debug:
     msg: "Deploying Red Hat Developer Hub using the RHDH Operator"
