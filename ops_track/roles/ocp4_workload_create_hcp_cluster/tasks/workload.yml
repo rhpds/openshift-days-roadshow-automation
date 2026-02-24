@@ -169,19 +169,61 @@
   ignore_errors: true
 
 - name: Wait for HostedCluster to become available
-  kubernetes.core.k8s_info:
-    api_version: hypershift.openshift.io/v1beta1
-    kind: HostedCluster
-    name: "{{ ocp4_workload_create_hcp_cluster_name }}"
-    namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
-  register: r_hosted_cluster
-  retries: "{{ (ocp4_workload_create_hcp_cluster_timeout | int / 10) | int }}"
-  delay: 10
-  until:
-    - r_hosted_cluster.resources | length > 0
-    - r_hosted_cluster.resources[0].status is defined
-    - r_hosted_cluster.resources[0].status.conditions is defined
-    - r_hosted_cluster.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | selectattr('status', 'equalto', 'True') | list | length > 0
+  block:
+    - name: Poll HostedCluster until Available
+      kubernetes.core.k8s_info:
+        api_version: hypershift.openshift.io/v1beta1
+        kind: HostedCluster
+        name: "{{ ocp4_workload_create_hcp_cluster_name }}"
+        namespace: "{{ ocp4_workload_create_hcp_cluster_namespace }}"
+      register: r_hosted_cluster
+      retries: "{{ (ocp4_workload_create_hcp_cluster_timeout | int / 10) | int }}"
+      delay: 10
+      until:
+        - r_hosted_cluster.resources | length > 0
+        - r_hosted_cluster.resources[0].status is defined
+        - r_hosted_cluster.resources[0].status.conditions is defined
+        - r_hosted_cluster.resources[0].status.conditions | selectattr('type', 'equalto', 'Available') | selectattr('status', 'equalto', 'True') | list | length > 0
+  rescue:
+    - name: DEBUG - Post-failure HCP cluster state
+      shell: |
+        echo "=== HCP CLUSTER WAIT FAILED - COLLECTING DIAGNOSTICS ==="
+        echo ""
+        echo "=== HOSTEDCLUSTER CONDITIONS ==="
+        oc get hostedcluster {{ ocp4_workload_create_hcp_cluster_name }} -n {{ ocp4_workload_create_hcp_cluster_namespace }} -o jsonpath='{range .status.conditions[*]}{.type}={.status} | {.reason} | {.message}{"\n"}{end}' 2>/dev/null || echo "HostedCluster not found"
+        echo ""
+        echo "=== HCP CONTROL PLANE PODS ==="
+        oc get pods -n clusters-{{ ocp4_workload_create_hcp_cluster_name }} -o wide 2>/dev/null | head -40 || echo "No HCP namespace"
+        echo ""
+        echo "=== PENDING/FAILED HCP PODS ==="
+        oc get pods -n clusters-{{ ocp4_workload_create_hcp_cluster_name }} --field-selector=status.phase!=Running,status.phase!=Succeeded --no-headers 2>/dev/null | head -20 || echo "All pods running"
+        echo ""
+        echo "=== HCP PVCs ==="
+        oc get pvc -n clusters-{{ ocp4_workload_create_hcp_cluster_name }} -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,CAPACITY:.status.capacity.storage,STORAGECLASS:.spec.storageClassName 2>/dev/null || echo "No PVCs"
+        echo ""
+        echo "=== HCP EVENTS (last 30) ==="
+        oc get events -n clusters-{{ ocp4_workload_create_hcp_cluster_name }} --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || echo "No events"
+        echo ""
+        echo "=== ETCD STATEFULSET ==="
+        oc get statefulset -n clusters-{{ ocp4_workload_create_hcp_cluster_name }} 2>/dev/null || echo "No StatefulSets"
+        echo ""
+        echo "=== NODE RESOURCE USAGE ==="
+        oc adm top nodes 2>/dev/null || echo "Metrics not available"
+        echo ""
+        echo "=== STORAGE CLASSES ==="
+        oc get sc 2>/dev/null || echo "Failed"
+      register: debug_hcp_failure
+      ignore_errors: true
+
+    - name: DEBUG - Display post-failure HCP diagnostics
+      debug:
+        msg: "{{ debug_hcp_failure.stdout_lines | default(['no output']) }}"
+      when: debug_hcp_failure is defined
+      ignore_errors: true
+
+    - name: Fail with clear message
+      fail:
+        msg: "HCP HostedCluster did not become available within {{ ocp4_workload_create_hcp_cluster_timeout }} seconds. See diagnostics above."
 
 - name: Get hosted cluster kubeconfig secret name
   set_fact:
