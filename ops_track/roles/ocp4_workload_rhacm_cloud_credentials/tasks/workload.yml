@@ -18,21 +18,9 @@
         definition: "{{ lookup('template', './templates/azure_secret.j2' ) | from_yaml }}"
 
 - when: ocp4_workload_rhacm_cloud_credentials_kubevirt | default(false) | bool
+  vars:
+    ocp4_workload_rhacm_cloud_credentials_kubevirt_pubkey: ""
   block:
-    - name: Generate SSH keypair for KubeVirt credential
-      command: ssh-keygen -t ed25519 -f /tmp/hcp-ssh-key -N "" -C "hcp-{{ guid | default('workshop') }}"
-      args:
-        creates: /tmp/hcp-ssh-key
-
-    - name: Read generated SSH public key
-      slurp:
-        src: /tmp/hcp-ssh-key.pub
-      register: hcp_ssh_pubkey_file
-
-    - name: Set SSH public key fact
-      set_fact:
-        ocp4_workload_rhacm_cloud_credentials_kubevirt_pubkey: "{{ hcp_ssh_pubkey_file.content | b64decode | trim }}"
-
     - name: Create OpenShift objects for workload - KubeVirt
       kubernetes.core.k8s:
         state: present
