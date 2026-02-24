@@ -230,20 +230,82 @@
   ignore_errors: true
 
 # ==============================================================================
-# Wait for Central to be ready
+# Wait for Central to be ready (with post-failure diagnostics)
 # ==============================================================================
 - name: Wait for Central availability
-  ansible.builtin.uri:
-    url: "https://{{ f_stackrox_central_addr }}/v1/ping"
-    method: GET
-    user: admin
-    password: "{{ _ocp4_workload_rhacs_central_admin_password }}"
-    force_basic_auth: true
-    validate_certs: false
-  register: result
-  until: result.status == 200
-  retries: 60
-  delay: 20
+  block:
+    - name: Ping Central endpoint
+      ansible.builtin.uri:
+        url: "https://{{ f_stackrox_central_addr }}/v1/ping"
+        method: GET
+        user: admin
+        password: "{{ _ocp4_workload_rhacs_central_admin_password }}"
+        force_basic_auth: true
+        validate_certs: false
+      register: result
+      until: result.status == 200
+      retries: 60
+      delay: 20
+  rescue:
+    - name: DEBUG - Post-failure cluster state
+      shell: |
+        echo "=== CENTRAL PING FAILED - COLLECTING DIAGNOSTICS ==="
+        echo ""
+        echo "=== STACKROX PODS (final state) ==="
+        oc get pods -n stackrox -o wide 2>/dev/null || echo "No pods"
+        echo ""
+        echo "=== STACKROX PVCS (final state) ==="
+        oc get pvc -n stackrox 2>/dev/null || echo "No PVCs"
+        echo ""
+        echo "=== CENTRAL POD DESCRIBE ==="
+        CENTRAL_POD=$(oc get pods -n stackrox -l app=central -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -n "$CENTRAL_POD" ]; then
+          echo "Pod: $CENTRAL_POD"
+          echo "Phase: $(oc get pod $CENTRAL_POD -n stackrox -o jsonpath='{.status.phase}' 2>/dev/null)"
+          echo "Restarts: $(oc get pod $CENTRAL_POD -n stackrox -o jsonpath='{.status.containerStatuses[0].restartCount}' 2>/dev/null)"
+          echo "Ready: $(oc get pod $CENTRAL_POD -n stackrox -o jsonpath='{.status.containerStatuses[0].ready}' 2>/dev/null)"
+          echo ""
+          echo "=== CENTRAL POD LOGS (last 50 lines) ==="
+          oc logs $CENTRAL_POD -n stackrox --tail=50 2>/dev/null || echo "No logs"
+        else
+          echo "Central pod not found"
+        fi
+        echo ""
+        echo "=== CENTRAL-DB POD ==="
+        DB_POD=$(oc get pods -n stackrox -l app=central-db -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -n "$DB_POD" ]; then
+          echo "Pod: $DB_POD"
+          echo "Phase: $(oc get pod $DB_POD -n stackrox -o jsonpath='{.status.phase}' 2>/dev/null)"
+          echo ""
+          echo "=== CENTRAL-DB LOGS (last 30 lines) ==="
+          oc logs $DB_POD -n stackrox --tail=30 2>/dev/null || echo "No logs"
+        else
+          echo "central-db pod not found"
+        fi
+        echo ""
+        echo "=== STACKROX EVENTS (last 30) ==="
+        oc get events -n stackrox --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || echo "No events"
+        echo ""
+        echo "=== NODE RESOURCE USAGE (at failure) ==="
+        oc adm top nodes 2>/dev/null || echo "Metrics not available"
+        echo ""
+        echo "=== PENDING PODS CLUSTER-WIDE ==="
+        oc get pods -A --field-selector=status.phase=Pending --no-headers 2>/dev/null | head -20 || echo "No pending pods"
+        echo ""
+        echo "=== CURL TEST ==="
+        curl -sk -o /dev/null -w "HTTP_CODE=%{http_code} TIME=%{time_total}s" https://{{ f_stackrox_central_addr }}/v1/ping 2>&1 || echo "curl failed"
+      register: debug_post_failure
+      ignore_errors: true
+
+    - name: DEBUG - Display post-failure diagnostics
+      debug:
+        msg: "{{ debug_post_failure.stdout_lines | default(['no output']) }}"
+      when: debug_post_failure is defined
+      ignore_errors: true
+
+    - name: Fail with original error
+      fail:
+        msg: "RHACS Central did not become available within 20 minutes. See diagnostics above."
 
 - name: Fix Route to Central
   when: ocp4_workload_rhacs_enable_route_certs | bool
