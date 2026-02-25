@@ -23,6 +23,13 @@ spec:
         storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
 {% endif %}
     db:
+      resources:
+        requests:
+          cpu: '500m'
+          memory: 2Gi
+        limits:
+          cpu: '2'
+          memory: 4Gi
       persistence:
         persistentVolumeClaim:
 {% if ocp4_workload_rhacs_central_storage_class is defined %}
@@ -46,19 +53,40 @@ spec:
 {% if ocp4_workload_rhacs_install_operator_channel.split('-')[1] | float >= 4.4 %}
   scannerV4:
     db:
+      resources:
+        requests:
+          cpu: '500m'
+          memory: 1Gi
+        limits:
+          cpu: '1'
+          memory: 2Gi
       persistence:
         persistentVolumeClaim:
 {% if ocp4_workload_rhacs_central_storage_class is defined %}
           storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
 {% endif %}
-    matcher:
+    indexer:
+      scaling:
+        autoScaling: Disabled
+        replicas: 1
       resources:
-        limits:
-          cpu: '2'
-          memory: 7Gi
         requests:
+          cpu: '500m'
+          memory: 512Mi
+        limits:
           cpu: '1'
-          memory: 1500Mi
+          memory: 2Gi
+    matcher:
+      scaling:
+        autoScaling: Disabled
+        replicas: 1
+      resources:
+        requests:
+          cpu: '500m'
+          memory: 512Mi
+        limits:
+          cpu: '1'
+          memory: 2Gi
     scannerComponent: Enabled
 {% endif %}
 {% endif %}

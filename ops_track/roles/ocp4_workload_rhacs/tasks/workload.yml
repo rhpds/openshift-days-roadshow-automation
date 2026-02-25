@@ -389,6 +389,14 @@
         name: stackrox-secured-cluster-services
       spec:
         clusterName: production
+        sensor:
+          resources:
+            requests:
+              cpu: '500m'
+              memory: 1Gi
+            limits:
+              cpu: '2'
+              memory: 4Gi
         admissionControl:
           listenOnCreates: true
           listenOnEvents: true
