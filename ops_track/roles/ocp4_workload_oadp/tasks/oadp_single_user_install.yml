@@ -1,4 +1,51 @@
 ---
+# If using a catalog snapshot, wait for the CatalogSource to become ready
+# before calling install_operator. The install_operator role does not wait
+# for CatalogSource readiness, causing InstallPlan creation to fail.
+- name: Wait for OADP CatalogSource to be ready
+  when: ocp4_workload_oadp_use_catalog_snapshot | default(false) | bool
+  block:
+    - name: Create openshift-adp namespace for CatalogSource
+      kubernetes.core.k8s:
+        state: present
+        api_version: v1
+        kind: Namespace
+        name: openshift-adp
+
+    - name: Create OADP CatalogSource
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: CatalogSource
+          metadata:
+            name: "{{ ocp4_workload_oadp_catalogsource_name }}"
+            namespace: openshift-adp
+          spec:
+            sourceType: grpc
+            image: "{{ ocp4_workload_oadp_catalog_snapshot_image }}:{{ ocp4_workload_oadp_catalog_snapshot_image_tag }}"
+            displayName: OADP Catalog Snapshot
+
+    - name: Wait for OADP CatalogSource to report READY
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        name: "{{ ocp4_workload_oadp_catalogsource_name }}"
+        namespace: openshift-adp
+      register: r_oadp_catalogsource
+      retries: 30
+      delay: 10
+      until:
+        - r_oadp_catalogsource.resources | length > 0
+        - r_oadp_catalogsource.resources[0].status is defined
+        - r_oadp_catalogsource.resources[0].status.connectionState is defined
+        - r_oadp_catalogsource.resources[0].status.connectionState.lastObservedState is defined
+        - r_oadp_catalogsource.resources[0].status.connectionState.lastObservedState == "READY"
+
+    - name: DEBUG - OADP CatalogSource is ready
+      debug:
+        msg: "OADP CatalogSource '{{ ocp4_workload_oadp_catalogsource_name }}' is READY in openshift-adp"
+
 - name: Install OADP Operator
   ansible.builtin.include_role:
     name: install_operator
