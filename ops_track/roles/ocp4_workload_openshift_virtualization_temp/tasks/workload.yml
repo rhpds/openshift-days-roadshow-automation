@@ -42,3 +42,100 @@
   when: diag_pre_workload is defined
   ignore_errors: true
 
+# ==============================================================================
+# WORKLOAD with post-failure diagnostics
+# ==============================================================================
+- name: Run workload with failure capture
+  block:
+
+
+  rescue:
+    - name: "DIAG - POST-FAILURE cluster state for ocp4_workload_openshift_virtualization"
+      shell: |
+        echo "====================================================================="
+        echo "WORKLOAD FAILED: ocp4_workload_openshift_virtualization" 
+        echo "====================================================================="
+        echo ""
+        echo "=== NODE USAGE AT FAILURE ==="
+        oc adm top nodes 2>/dev/null || echo "Metrics not available"
+        echo ""
+        echo "=== TOTAL RESOURCE REQUESTS ==="
+        oc get pods -A -o json 2>/dev/null | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        cpu_m, mem_mi = 0, 0
+        for pod in data.get('items', []):
+            if pod.get('status', {}).get('phase') not in ('Running', 'Pending'): continue
+            for c in pod.get('spec', {}).get('containers', []):
+                req = c.get('resources', {}).get('requests', {})
+                cpu = req.get('cpu', '0')
+                mem = req.get('memory', '0')
+                if cpu.endswith('m'): cpu_m += int(cpu[:-1])
+                elif cpu:
+                    try: cpu_m += int(float(cpu) * 1000)
+                    except: pass
+                if mem.endswith('Gi'): mem_mi += int(float(mem[:-2]) * 1024)
+                elif mem.endswith('Mi'): mem_mi += int(float(mem[:-2]))
+        print(f'Total CPU requested: {cpu_m}m ({cpu_m/1000:.1f} cores)')
+        print(f'Total Memory requested: {mem_mi}Mi ({mem_mi/1024:.1f} Gi)')
+        " 2>/dev/null || echo "Failed"
+        echo ""
+        echo "=== PODS BY PHASE ==="
+        echo "Running:        0"
+        echo "Pending:        0"
+        echo "Failed:        0"
+        echo "Total:        0"
+        echo ""
+        echo "=== PENDING PODS ==="
+        oc get pods -A --field-selector=status.phase=Pending -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,NODE:.spec.nodeName --no-headers 2>/dev/null | head -20 || echo "None"
+        echo ""
+        echo "=== CRASHLOOPING PODS ==="
+        oc get pods -A -o json 2>/dev/null | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        for pod in data.get('items', []):
+            for cs in pod.get('status', {}).get('containerStatuses', []):
+                if cs.get('restartCount', 0) > 3:
+                    print(f'{pod[\"metadata\"][\"namespace\"]}/{pod[\"metadata\"][\"name\"]} restarts={cs[\"restartCount\"]}')
+        " 2>/dev/null | head -10 || echo "None"
+        echo ""
+        echo "=== CSVs NOT SUCCEEDED ==="
+        oc get csv -A --no-headers 2>/dev/null | grep -v Succeeded | head -20 || echo "All succeeded"
+        echo ""
+        echo "=== PENDING PVCs ==="
+        oc get pvc -A --field-selector=status.phase!=Bound --no-headers 2>/dev/null | head -10 || echo "All bound"
+        echo ""
+        echo "=== DEGRADED CLUSTER OPERATORS ==="
+        oc get co -o json 2>/dev/null | python3 -c "
+        import sys, json
+        data = json.load(sys.stdin)
+        for co in data.get('items', []):
+            name = co['metadata']['name']
+            conds = {c['type']: c for c in co.get('status', {}).get('conditions', [])}
+            avail = conds.get('Available', {}).get('status', 'Unknown')
+            degrade = conds.get('Degraded', {}).get('status', 'Unknown')
+            if avail != 'True' or degrade == 'True':
+                msg = conds.get('Degraded', {}).get('message', '')[:200] if degrade == 'True' else conds.get('Available', {}).get('message', '')[:200]
+                print(f'{name}: Available={avail} Degraded={degrade} {msg}')
+        " 2>/dev/null || echo "Failed"
+        echo ""
+        echo "=== FAILEDSCHEDULING EVENTS ==="
+        oc get events -A --field-selector reason=FailedScheduling --no-headers 2>/dev/null | tail -10 || echo "None"
+        echo ""
+        echo "=== IMAGE PULL ERRORS ==="
+        oc get events -A --field-selector reason=Failed --no-headers 2>/dev/null | grep -i "pull\|image\|registry" | tail -10 || echo "None"
+        echo ""
+        echo "=== RECENT WARNING EVENTS (last 20) ==="
+        oc get events -A --field-selector type=Warning --sort-by='.lastTimestamp' --no-headers 2>/dev/null | tail -20 || echo "None"
+      register: diag_post_failure
+      ignore_errors: true
+
+    - name: "DIAG - Display post-failure state"
+      debug:
+        msg: "{{ diag_post_failure.stdout_lines | default(['no output']) }}"
+      when: diag_post_failure is defined
+      ignore_errors: true
+
+    - name: Fail with original error
+      fail:
+        msg: "Workload ocp4_workload_openshift_virtualization failed. See diagnostics above."
