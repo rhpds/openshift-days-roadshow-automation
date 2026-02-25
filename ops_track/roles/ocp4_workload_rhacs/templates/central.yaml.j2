@@ -8,6 +8,13 @@ spec:
   central:
     adminPasswordSecret:
       name: acs-password
+    resources:
+      requests:
+        cpu: '500m'
+        memory: 2Gi
+      limits:
+        cpu: '2'
+        memory: 4Gi
     exposure:
       loadBalancer:
         enabled: false
@@ -42,6 +49,13 @@ spec:
       scaling:
         autoScaling: Disabled
         replicas: 1
+      resources:
+        requests:
+          cpu: '500m'
+          memory: 512Mi
+        limits:
+          cpu: '1'
+          memory: 2Gi
     scannerComponent: Enabled
     db:
       persistence:
