@@ -17,22 +17,6 @@
     echo ""
     echo "=== PENDING PVCs ==="
     oc get pvc -A --field-selector=status.phase!=Bound --no-headers 2>/dev/null | head -10 || echo "All bound"
-    echo ""
-    echo "=== DEGRADED CLUSTER OPERATORS ==="
-    oc get co -o json 2>/dev/null | python3 -c "
-    import sys, json
-    data = json.load(sys.stdin)
-    for co in data.get('items', []):
-        name = co['metadata']['name']
-        conds = {c['type']: c for c in co.get('status', {}).get('conditions', [])}
-        avail = conds.get('Available', {}).get('status', 'Unknown')
-        degrade = conds.get('Degraded', {}).get('status', 'Unknown')
-        if avail != 'True' or degrade == 'True':
-            print(f'{name}: Available={avail} Degraded={degrade}')
-    " 2>/dev/null || echo "Failed"
-    echo ""
-    echo "=== RECENT WARNINGS (last 10) ==="
-    oc get events -A --field-selector type=Warning --sort-by='.lastTimestamp' --no-headers 2>/dev/null | tail -10 || echo "None"
   register: diag_pre_workload
   ignore_errors: true
 
@@ -47,57 +31,74 @@
 # ==============================================================================
 - name: Run workload with failure capture
   block:
+    - name: Install MetalLB Operator
+      ansible.builtin.include_role:
+        name: install_operator
+      vars:
+        install_operator_action: install
+        install_operator_name: metallb-operator
+        install_operator_namespace: metallb-system
+        install_operator_manage_namespaces: []
+        install_operator_channel: "{{ ocp4_workload_metallb_channel }}"
+        install_operator_catalog: redhat-operators
+        install_operator_automatic_install_plan_approval: "{{ ocp4_workload_metallb_automatic_install_plan_approval | default(true) }}"
+        install_operator_starting_csv: "{{ ocp4_workload_metallb_starting_csv }}"
+        install_operator_catalogsource_setup: "{{ ocp4_workload_metallb_use_catalog_snapshot | default(false) }}"
+        install_operator_catalogsource_name: "{{ ocp4_workload_metallb_catalogsource_name | default('') }}"
+        install_operator_catalogsource_namespace: metallb-system
+        install_operator_catalogsource_image: "{{ ocp4_workload_metallb_catalog_snapshot_image | default('') }}"
+        install_operator_catalogsource_image_tag: "{{ ocp4_workload_metallb_catalog_snapshot_image_tag | default('') }}"
+
+    - name: Create the MetalLB instance
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ lookup('file', 'metallb.yaml') }}"
+
+    - name: Wait until MetalLB is installed
+      kubernetes.core.k8s_info:
+        api_version: metallb.io/v1beta1
+        kind: MetalLB
+        name: metallb
+        namespace: metallb-system
+        wait: true
+        wait_condition:
+          reason: Available
+          status: 'True'
+          type: Available
+        wait_sleep: 10
+        wait_timeout: 600
+
+    - name: Create the IPAddressPool instance
+      when: ocp4_workload_metallb_enable_ipaddresspool | default(false)
+      kubernetes.core.k8s:
+        state: present
+        template: ipaddresspool.yaml.j2
+
+    - name: Create the L2Advertisement instance
+      when: ocp4_workload_metallb_enable_l2advertisement | default(false)
+      kubernetes.core.k8s:
+        state: present
+        template: l2advertisement.yaml.j2
 
 
   rescue:
-    - name: "DIAG - POST-FAILURE cluster state for ocp4_workload_metallb"
+    - name: "DIAG - POST-FAILURE state for ocp4_workload_metallb"
       shell: |
         echo "====================================================================="
-        echo "WORKLOAD FAILED: ocp4_workload_metallb" 
+        echo "WORKLOAD FAILED: ocp4_workload_metallb"
         echo "====================================================================="
         echo ""
         echo "=== NODE USAGE AT FAILURE ==="
         oc adm top nodes 2>/dev/null || echo "Metrics not available"
         echo ""
-        echo "=== TOTAL RESOURCE REQUESTS ==="
-        oc get pods -A -o json 2>/dev/null | python3 -c "
-        import sys, json
-        data = json.load(sys.stdin)
-        cpu_m, mem_mi = 0, 0
-        for pod in data.get('items', []):
-            if pod.get('status', {}).get('phase') not in ('Running', 'Pending'): continue
-            for c in pod.get('spec', {}).get('containers', []):
-                req = c.get('resources', {}).get('requests', {})
-                cpu = req.get('cpu', '0')
-                mem = req.get('memory', '0')
-                if cpu.endswith('m'): cpu_m += int(cpu[:-1])
-                elif cpu:
-                    try: cpu_m += int(float(cpu) * 1000)
-                    except: pass
-                if mem.endswith('Gi'): mem_mi += int(float(mem[:-2]) * 1024)
-                elif mem.endswith('Mi'): mem_mi += int(float(mem[:-2]))
-        print(f'Total CPU requested: {cpu_m}m ({cpu_m/1000:.1f} cores)')
-        print(f'Total Memory requested: {mem_mi}Mi ({mem_mi/1024:.1f} Gi)')
-        " 2>/dev/null || echo "Failed"
-        echo ""
         echo "=== PODS BY PHASE ==="
-        echo "Running:        0"
-        echo "Pending:        0"
-        echo "Failed:        0"
-        echo "Total:        0"
+        echo "Running: $(oc get pods -A --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)"
+        echo "Pending: $(oc get pods -A --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l)"
+        echo "Failed: $(oc get pods -A --field-selector=status.phase=Failed --no-headers 2>/dev/null | wc -l)"
+        echo "Total: $(oc get pods -A --no-headers 2>/dev/null | wc -l)"
         echo ""
         echo "=== PENDING PODS ==="
-        oc get pods -A --field-selector=status.phase=Pending -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,NODE:.spec.nodeName --no-headers 2>/dev/null | head -20 || echo "None"
-        echo ""
-        echo "=== CRASHLOOPING PODS ==="
-        oc get pods -A -o json 2>/dev/null | python3 -c "
-        import sys, json
-        data = json.load(sys.stdin)
-        for pod in data.get('items', []):
-            for cs in pod.get('status', {}).get('containerStatuses', []):
-                if cs.get('restartCount', 0) > 3:
-                    print(f'{pod[\"metadata\"][\"namespace\"]}/{pod[\"metadata\"][\"name\"]} restarts={cs[\"restartCount\"]}')
-        " 2>/dev/null | head -10 || echo "None"
+        oc get pods -A --field-selector=status.phase=Pending -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name --no-headers 2>/dev/null | head -20 || echo "None"
         echo ""
         echo "=== CSVs NOT SUCCEEDED ==="
         oc get csv -A --no-headers 2>/dev/null | grep -v Succeeded | head -20 || echo "All succeeded"
@@ -105,27 +106,13 @@
         echo "=== PENDING PVCs ==="
         oc get pvc -A --field-selector=status.phase!=Bound --no-headers 2>/dev/null | head -10 || echo "All bound"
         echo ""
-        echo "=== DEGRADED CLUSTER OPERATORS ==="
-        oc get co -o json 2>/dev/null | python3 -c "
-        import sys, json
-        data = json.load(sys.stdin)
-        for co in data.get('items', []):
-            name = co['metadata']['name']
-            conds = {c['type']: c for c in co.get('status', {}).get('conditions', [])}
-            avail = conds.get('Available', {}).get('status', 'Unknown')
-            degrade = conds.get('Degraded', {}).get('status', 'Unknown')
-            if avail != 'True' or degrade == 'True':
-                msg = conds.get('Degraded', {}).get('message', '')[:200] if degrade == 'True' else conds.get('Available', {}).get('message', '')[:200]
-                print(f'{name}: Available={avail} Degraded={degrade} {msg}')
-        " 2>/dev/null || echo "Failed"
-        echo ""
         echo "=== FAILEDSCHEDULING EVENTS ==="
         oc get events -A --field-selector reason=FailedScheduling --no-headers 2>/dev/null | tail -10 || echo "None"
         echo ""
         echo "=== IMAGE PULL ERRORS ==="
         oc get events -A --field-selector reason=Failed --no-headers 2>/dev/null | grep -i "pull\|image\|registry" | tail -10 || echo "None"
         echo ""
-        echo "=== RECENT WARNING EVENTS (last 20) ==="
+        echo "=== RECENT WARNINGS (last 20) ==="
         oc get events -A --field-selector type=Warning --sort-by='.lastTimestamp' --no-headers 2>/dev/null | tail -20 || echo "None"
       register: diag_post_failure
       ignore_errors: true
