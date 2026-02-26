@@ -1158,6 +1158,14 @@
   register: copy_site_result
   when: enable_workshop_cli_tools | default(true) | bool
 
+- name: Resolve DOMAIN variable in ui-config.yml
+  shell: |
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- sh -c '
+    sed -i "s/\${DOMAIN}/{{ route_subdomain }}/g" /showroom/www/ui-config.yml 2>/dev/null
+    echo "Resolved DOMAIN to {{ route_subdomain }}"'
+  ignore_errors: true
+  when: enable_workshop_cli_tools | default(true) | bool
+
 - name: Verify workshop variables are rendered
   shell: |
     oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- bash -c '
