@@ -105,7 +105,7 @@
           kind: Deployment
           namespace: "{{ ocp4_workload_quay_operator_registry_namespace }}"
           label_selectors:
-            - quay-component=quay-app
+            - quay-component=quay
         register: r_quay_app_deployment
         until: r_quay_app_deployment.resources | length > 0
         retries: 30
