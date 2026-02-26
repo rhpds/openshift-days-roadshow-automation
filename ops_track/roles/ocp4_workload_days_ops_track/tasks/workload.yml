@@ -1024,8 +1024,7 @@
 
 - name: Wait for Showroom pod to be fully ready
   shell: |
-    POD_NAME=$(oc get pods -n {{ showroom_namespace }} -l app=showroom --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-    oc wait --for=condition=ready pod/$POD_NAME -n {{ showroom_namespace }} --timeout=300s
+    oc rollout status deployment/showroom -n {{ showroom_namespace }} --timeout=300s
 
 - name: Inject workshop environment variables into antora.yml
   shell: |
