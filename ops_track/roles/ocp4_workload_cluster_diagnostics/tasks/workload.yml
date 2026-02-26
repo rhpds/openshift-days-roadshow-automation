@@ -503,6 +503,45 @@
   ignore_errors: true
 
 # ==============================================================================
+# FIX: Trigger OAuth route webhook for console embed
+# The authentication operator reverts the OAuth route to passthrough after
+# ocp_console_embed patches it. Triggering an update here (after all operators
+# have settled) lets the webhook mutate it back to reencrypt permanently.
+# ==============================================================================
+- name: Trigger OAuth route webhook for console embed
+  kubernetes.core.k8s:
+    api_version: route.openshift.io/v1
+    kind: Route
+    name: oauth-openshift
+    namespace: openshift-authentication
+    state: patched
+    definition:
+      metadata:
+        annotations:
+          ocp-console-embed/triggered: "true"
+  ignore_errors: true
+
+- name: Wait for OAuth route to be reencrypt
+  kubernetes.core.k8s_info:
+    api_version: route.openshift.io/v1
+    kind: Route
+    name: oauth-openshift
+    namespace: openshift-authentication
+  register: r_oauth_route
+  retries: 5
+  delay: 5
+  until:
+    - r_oauth_route.resources | length > 0
+    - r_oauth_route.resources[0].spec.tls.termination == "reencrypt"
+  ignore_errors: true
+
+- name: Display OAuth route status
+  debug:
+    msg: "OAuth route TLS: {{ r_oauth_route.resources[0].spec.tls.termination | default('unknown') }}"
+  when: r_oauth_route is defined
+  ignore_errors: true
+
+# ==============================================================================
 # DONE
 # ==============================================================================
 - name: DIAG - Cluster diagnostics complete
