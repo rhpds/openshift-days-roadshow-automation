@@ -1141,20 +1141,20 @@
     namespace: "{{ showroom_namespace }}"
   register: Route
 
-- name: Provide workshop information
+- name: Publish workshop data for info-message-template rendering
   agnosticd.core.agnosticd_user_info:
-    msg: "{{ item }}"
-  loop:
-  - ""
-  - "Access the workshop at https://{{ Route.resources[0].spec.host }}"
-  - "Workshop has cluster-admin permissions enabled"
-  - "Environment variables available in ConfigMap: workshop-env"
-  - ""
-  - "Cluster Information:"
-  - "  API URL: {{ api_url }}"
-  - "  Console: {{ master_url }}"
-  - "  Admin Password: {{ common_admin_password | default('not-set') }}"
-  - ""
+    data:
+      showroom_url: "https://{{ Route.resources[0].spec.host }}"
+      openshift_cluster_console_url: "{{ master_url }}"
+      openshift_api_server_url: "{{ api_url }}"
+      openshift_cluster_admin_password: "{{ common_admin_password | default('not-set') }}"
+      openshift_cluster_admin_username: "admin"
+      route_subdomain: "{{ route_subdomain }}"
+      guid: "{{ guid }}"
+      module_enable_security: "{{ module_enable_security | default(true) }}"
+      module_enable_acm: "{{ module_enable_acm | default(true) }}"
+      module_enable_devhub: "{{ module_enable_devhub | default(true) }}"
+      module_enable_ols: "{{ module_enable_ols | default(true) }}"
 
 # ==============================================================================
 # OpenShift Lightspeed demo resources
