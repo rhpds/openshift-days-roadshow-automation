@@ -91,8 +91,8 @@ spec:
           storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
 {% endif %}
 {% endif %}
-    indexer:
 {% if ocp4_workload_rhacs_scanner_v4_resources_update | default(false) | bool %}
+    indexer:
       scaling:
         autoScaling: Disabled
         replicas: {{ ocp4_workload_rhacs_scanner_v4_indexer_replicas }}
