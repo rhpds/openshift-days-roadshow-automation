@@ -31,6 +31,7 @@ spec:
 {% if ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
         storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
 {% endif %}
+{% if ocp4_workload_rhacs_central_db_resources_update | default(false) | bool or ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
     db:
 {% if ocp4_workload_rhacs_central_db_resources_update | default(false) | bool %}
       resources:
@@ -41,10 +42,11 @@ spec:
           cpu: '{{ ocp4_workload_rhacs_central_db_limits_cpu }}'
           memory: {{ ocp4_workload_rhacs_central_db_limits_memory }}
 {% endif %}
+{% if ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
       persistence:
         persistentVolumeClaim:
-{% if ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
           storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
+{% endif %}
 {% endif %}
   egress:
     connectivityPolicy: Online
@@ -63,15 +65,16 @@ spec:
           memory: {{ ocp4_workload_rhacs_scanner_limits_memory }}
 {% endif %}
     scannerComponent: Enabled
+{% if ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
     db:
       persistence:
         persistentVolumeClaim:
-{% if ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
           storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
 {% endif %}
 {% if ocp4_workload_rhacs_enable_central_scanner_v4 | bool %}
 {% if ocp4_workload_rhacs_install_operator_channel.split('-')[1] | float >= 4.4 %}
   scannerV4:
+{% if ocp4_workload_rhacs_scanner_v4_resources_update | default(false) | bool or ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
     db:
 {% if ocp4_workload_rhacs_scanner_v4_resources_update | default(false) | bool %}
       resources:
@@ -82,10 +85,11 @@ spec:
           cpu: '{{ ocp4_workload_rhacs_scanner_v4_db_limits_cpu }}'
           memory: {{ ocp4_workload_rhacs_scanner_v4_db_limits_memory }}
 {% endif %}
+{% if ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
       persistence:
         persistentVolumeClaim:
-{% if ocp4_workload_rhacs_central_storage_class | default('') | length > 0 %}
           storageClassName: {{ ocp4_workload_rhacs_central_storage_class }}
+{% endif %}
 {% endif %}
     indexer:
 {% if ocp4_workload_rhacs_scanner_v4_resources_update | default(false) | bool %}
