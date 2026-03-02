@@ -30,7 +30,7 @@
   when: ocp4_workload_rhacs_collector_config_enable | bool
   kubernetes.core.k8s:
     state: present
-    definition: "{{ lookup('template', 'securedcluster.yaml.j2') | from_yaml }}" "{{ lookup('template', 'collector-config.yaml.j2') | from_yaml }}"
+    definition: "{{ lookup('template', 'collector-config.yaml.j2') | from_yaml }}"
   register: r_collector_config
   until: r_collector_config is successful
   retries: 30
@@ -53,7 +53,7 @@
 - name: Create Secret for Central admin password
   kubernetes.core.k8s:
     state: present
-    definition: "{{ lookup('template', 'securedcluster.yaml.j2') | from_yaml }}"
+    definition:
       apiVersion: v1
       kind: Secret
       metadata:
@@ -70,7 +70,7 @@
 - name: Create Central via CR
   kubernetes.core.k8s:
     state: present
-    definition: "{{ lookup('template', 'securedcluster.yaml.j2') | from_yaml }}" "{{ lookup('template', 'central.yaml.j2') | from_yaml }}"
+    definition: "{{ lookup('template', 'central.yaml.j2') | from_yaml }}"
   register: r_k8s
   until: r_k8s is successful
   retries: 30
@@ -140,7 +140,7 @@
       kind: Route
       name: central
       namespace: stackrox
-      definition: "{{ lookup('template', 'securedcluster.yaml.j2') | from_yaml }}"
+      definition:
         spec:
           tls:
             termination: reencrypt
@@ -171,7 +171,7 @@
   kubernetes.core.k8s:
     namespace: stackrox
     state: present
-    definition: "{{ lookup('template', 'securedcluster.yaml.j2') | from_yaml }}" "{{ f_stackrox_bundle }}"
+    definition: "{{ f_stackrox_bundle }}"
   register: r_k8s
   until: r_k8s is successful
   retries: 30
@@ -202,7 +202,7 @@
 - name: For fun, create a link in the OpenShift Console
   kubernetes.core.k8s:
     state: present
-    definition: "{{ lookup('template', 'securedcluster.yaml.j2') | from_yaml }}"
+    definition:
       apiVersion: console.openshift.io/v1
       kind: ConsoleLink
       metadata:
