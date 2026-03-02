@@ -17,23 +17,6 @@ spec:
     managed: true
   - kind: route
     managed: true
-  - kind: quay
-    managed: true
-{% if ocp4_workload_quay_operator_registry_quay_resources_update | default(false) | bool or ocp4_workload_quay_operator_registry_quay_replicas | default(2) | int != 2 %}
-    overrides:
-{% if ocp4_workload_quay_operator_registry_quay_replicas | default(2) | int != 2 %}
-      replicas: {{ ocp4_workload_quay_operator_registry_quay_replicas }}
-{% endif %}
-{% if ocp4_workload_quay_operator_registry_quay_resources_update | default(false) | bool %}
-      resources:
-        requests:
-          cpu: {{ ocp4_workload_quay_operator_registry_quay_requests_cpu }}
-          memory: {{ ocp4_workload_quay_operator_registry_quay_requests_memory }}
-        limits:
-          cpu: '{{ ocp4_workload_quay_operator_registry_quay_limits_cpu }}'
-          memory: {{ ocp4_workload_quay_operator_registry_quay_limits_memory }}
-{% endif %}
-{% endif %}
   - kind: clair
     managed: {{ ocp4_workload_quay_operator_registry_enable_clair }}
 {% if ocp4_workload_quay_operator_registry_enable_clair | bool %}
@@ -52,8 +35,27 @@ spec:
           memory: {{ ocp4_workload_quay_operator_registry_clair_limits_memory }}
 {% endif %}
 {% endif %}
+{% if ocp4_workload_quay_operator_registry_quay_resources_update | default(false) | bool or ocp4_workload_quay_operator_registry_quay_replicas | default(2) | int != 2 %}
+  - kind: quay
+    managed: true
+    overrides:
+{% if ocp4_workload_quay_operator_registry_quay_replicas | default(2) | int != 2 %}
+      replicas: {{ ocp4_workload_quay_operator_registry_quay_replicas }}
+{% endif %}
+{% if ocp4_workload_quay_operator_registry_quay_resources_update | default(false) | bool %}
+      resources:
+        requests:
+          cpu: {{ ocp4_workload_quay_operator_registry_quay_requests_cpu }}
+          memory: {{ ocp4_workload_quay_operator_registry_quay_requests_memory }}
+        limits:
+          cpu: '{{ ocp4_workload_quay_operator_registry_quay_limits_cpu }}'
+          memory: {{ ocp4_workload_quay_operator_registry_quay_limits_memory }}
+{% endif %}
+{% endif %}
+{% if ocp4_workload_quay_operator_registry_enable_clairpostgres | default(false) | bool %}
   - kind: clairpostgres
     managed: true
+{% endif %}
   - kind: horizontalpodautoscaler
     managed: {{ ocp4_workload_quay_operator_registry_enable_hpa }}
   - kind: mirror
