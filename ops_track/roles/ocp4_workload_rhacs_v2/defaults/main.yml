@@ -3,7 +3,7 @@ ocp4_workload_rhacs_install_operator_namespace: rhacs-operator
 ocp4_workload_rhacs_install_operator_channel: rhacs-4.9
 
 ocp4_workload_rhacs_install_operator_use_catalog_snapshot: false
-ocp4_workload_rhacs_install_operator_catalog_source_image: quay.io/gpte-devops-automation/olm_snapshot_redhat_catalog
+ocp4_workload_rhacs_install_operator_catalog_source_image: quay.io/rhpds/olm_snapshot_redhat_catalog
 ocp4_workload_rhacs_install_operator_catalog_source_tag: "v4.15_2024_04_08"
 
 ocp4_workload_rhacs_automatic_install_plan_approval: true
@@ -41,17 +41,17 @@ ocp4_workload_rhacs_scanner_limits_memory: "3Gi"
 # Scanner V4 Resource and Replica Overrides
 ocp4_workload_rhacs_scanner_v4_resources_update: false
 ocp4_workload_rhacs_scanner_v4_indexer_replicas: 3
-ocp4_workload_rhacs_scanner_v4_indexer_requests_cpu: "1500m"
+ocp4_workload_rhacs_scanner_v4_indexer_requests_cpu: "2"
 ocp4_workload_rhacs_scanner_v4_indexer_requests_memory: "1500Mi"
 ocp4_workload_rhacs_scanner_v4_indexer_limits_cpu: "2"
 ocp4_workload_rhacs_scanner_v4_indexer_limits_memory: "3Gi"
 ocp4_workload_rhacs_scanner_v4_matcher_replicas: 3
-ocp4_workload_rhacs_scanner_v4_matcher_requests_cpu: "1000m"
+ocp4_workload_rhacs_scanner_v4_matcher_requests_cpu: "1"
 ocp4_workload_rhacs_scanner_v4_matcher_requests_memory: "1500Mi"
 ocp4_workload_rhacs_scanner_v4_matcher_limits_cpu: "2"
 ocp4_workload_rhacs_scanner_v4_matcher_limits_memory: "7Gi"
-ocp4_workload_rhacs_scanner_v4_db_requests_cpu: "1000m"
-ocp4_workload_rhacs_scanner_v4_db_requests_memory: "2Gi"
+ocp4_workload_rhacs_scanner_v4_db_requests_cpu: "200m"
+ocp4_workload_rhacs_scanner_v4_db_requests_memory: "3Gi"
 ocp4_workload_rhacs_scanner_v4_db_limits_cpu: "2"
 ocp4_workload_rhacs_scanner_v4_db_limits_memory: "4Gi"
 
