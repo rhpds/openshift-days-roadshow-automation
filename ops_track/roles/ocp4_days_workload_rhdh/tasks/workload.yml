@@ -143,6 +143,29 @@
         database:
           enableLocalDb: true
 
+# Capture RHDH state before waiting — this always appears in the job log
+# so if the wait fails, we have diagnostics to debug with
+- name: DEBUG - RHDH pre-wait state
+  shell: |
+    echo "=== RHDH Pods ==="
+    oc get pods -n {{ ocp4_days_workload_rhdh_instance_namespace }} -o wide 2>/dev/null || echo "No pods found"
+    echo ""
+    echo "=== RHDH Pod Events ==="
+    oc get events -n {{ ocp4_days_workload_rhdh_instance_namespace }} --sort-by='.lastTimestamp' 2>/dev/null | tail -15
+    echo ""
+    echo "=== Init Container Logs ==="
+    oc logs -n {{ ocp4_days_workload_rhdh_instance_namespace }} -l rhdh.redhat.com/app=backstage-{{ ocp4_days_workload_rhdh_instance_name }} -c install-dynamic-plugins --tail=20 2>/dev/null || echo "Init container not started yet"
+    echo ""
+    echo "=== Deployment Conditions ==="
+    oc get deployment backstage-{{ ocp4_days_workload_rhdh_instance_name }} -n {{ ocp4_days_workload_rhdh_instance_namespace }} -o jsonpath='{.status.conditions}' 2>/dev/null | python3 -m json.tool || echo "Deployment not created yet"
+  register: r_rhdh_debug
+  ignore_errors: true
+
+- name: DEBUG - Display RHDH pre-wait state
+  debug:
+    msg: "{{ r_rhdh_debug.stdout_lines | default(['No debug output']) }}"
+  ignore_errors: true
+
 # Wait for Backstage to be ready
 - name: Wait for Backstage deployment to be ready
   kubernetes.core.k8s_info:
