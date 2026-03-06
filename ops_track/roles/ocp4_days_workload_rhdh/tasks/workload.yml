@@ -77,6 +77,30 @@
   retries: 30
   delay: 10
 
+# Create registry auth secret for the install-dynamic-plugins init container.
+# RHDH v1.9.0+ uses skopeo to pull the plugin catalog index from registry.redhat.io,
+# which needs credentials from this secret. We copy from the cluster's global pull secret.
+- name: Get global pull secret
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: pull-secret
+    namespace: openshift-config
+  register: r_pull_secret
+
+- name: Create registry auth secret for dynamic plugins
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: dynamic-plugins-registry-auth
+        namespace: "{{ ocp4_days_workload_rhdh_instance_namespace }}"
+      data:
+        auth.json: "{{ r_pull_secret.resources[0].data['.dockerconfigjson'] }}"
+  when: r_pull_secret.resources | length > 0
+
 # Create guest auth ConfigMap if enabled
 - name: Create guest auth ConfigMap
   kubernetes.core.k8s:
