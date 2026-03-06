@@ -12,7 +12,9 @@ ocp4_days_workload_rhdh_instance_namespace: backstage
 # Operator settings
 ocp4_days_workload_rhdh_channel: fast
 ocp4_days_workload_rhdh_automatic_install_plan_approval: true
-ocp4_days_workload_rhdh_starting_csv: ""
+# Pin to v1.8.4 — v1.9.0 on the fast channel requires a registry auth secret
+# for the install-dynamic-plugins init container that isn't created by default
+ocp4_days_workload_rhdh_starting_csv: "rhdh-operator.v1.8.4"
 
 # Catalog snapshot settings (optional)
 ocp4_days_workload_rhdh_use_catalog_snapshot: false
