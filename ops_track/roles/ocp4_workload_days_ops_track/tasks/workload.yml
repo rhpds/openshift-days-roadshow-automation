@@ -845,6 +845,7 @@
   retries: 60
   delay: 5
   changed_when: false
+  ignore_errors: true
 
 - name: Wait for NooBaa endpoint pod to get reduced CPU requests
   when:
@@ -859,6 +860,19 @@
   retries: 60
   delay: 5
   changed_when: false
+  ignore_errors: true
+
+- name: "NooBaa resource reduction - rollout status"
+  when:
+  - workshop_reduce_noobaa_resources | default(false) | bool
+  - r_storagecluster_patch is defined
+  - r_storagecluster_patch is success
+  debug:
+    msg: >-
+      Core: {{ 'ready (' + r_noobaa_core_cpu.stdout + ')' if (r_noobaa_core_cpu is success) else
+      'TIMEOUT - pod still at ' + (r_noobaa_core_cpu.stdout | default('unknown')) + ' after 5 min' }}.
+      Endpoint: {{ 'ready (' + r_noobaa_endpoint_cpu.stdout + ')' if (r_noobaa_endpoint_cpu is success) else
+      'TIMEOUT - pod still at ' + (r_noobaa_endpoint_cpu.stdout | default('unknown')) + ' after 5 min' }}.
 
 # ==============================================================================
 # LVMS Deployment Section (optional - enabled via workshop_deploy_lvms: true)
