@@ -755,16 +755,19 @@
 # NooBaa Resource Reduction (optional - enabled via workshop_reduce_noobaa_resources)
 #
 # On compact clusters (3-node control-plane/worker combo), NooBaa's default
-# CPU requests (~5500m total) consume a large portion of available capacity.
-# Actual usage is ~300m. This patches the NooBaa and BackingStore CRs to
-# reduce requests, freeing room for workloads deployed later (e.g. LokiStack).
+# CPU requests (~2000m core + ~1000m endpoint) consume capacity needed by
+# workloads deployed later (Quay, LokiStack, etc.).
 #
-# This runs at workload deploy time so it works regardless of when the
-# cluster pool was built (pool-level fixes only apply to new clusters).
+# The NooBaa operator fully manages the NooBaa CR, StatefulSet, and Deployment
+# — direct patches are reverted within seconds. The correct path is to set
+# resources via the StorageCluster CR, which the OCS operator propagates down:
+#   StorageCluster -> OCS operator -> NooBaa CR -> NooBaa operator -> pods
 #
-# To revert: set workshop_reduce_noobaa_resources to false. The NooBaa
-# operator will NOT revert automatically — you would need to manually patch
-# the CRs back or rebuild the cluster.
+# - spec.resources["noobaa-core"] controls core pod resources
+# - spec.multiCloudGateway.endpoints.resources controls endpoint pod resources
+#
+# To revert: remove the StorageCluster patches or set
+# workshop_reduce_noobaa_resources to false and rebuild the cluster.
 # ==============================================================================
 
 - name: "NooBaa resource reduction - check if enabled"
@@ -772,95 +775,104 @@
     msg: >-
       workshop_reduce_noobaa_resources={{ workshop_reduce_noobaa_resources | default(false) }}.
       {% if workshop_reduce_noobaa_resources | default(false) | bool %}
-      Will patch NooBaa CR (core={{ workshop_noobaa_core_cpu_requests }},
-      endpoint={{ workshop_noobaa_endpoint_cpu_requests }}) and
-      BackingStore ({{ workshop_noobaa_backingstore_cpu_requests }}).
+      Will patch StorageCluster (core={{ workshop_noobaa_core_cpu_requests }},
+      endpoint={{ workshop_noobaa_endpoint_cpu_requests }}).
       {% else %}
       Skipping NooBaa resource reduction (not enabled).
       {% endif %}
 
-- name: Check if NooBaa CR exists
+- name: Check if StorageCluster exists
   when: workshop_reduce_noobaa_resources | default(false) | bool
   kubernetes.core.k8s_info:
-    api_version: noobaa.io/v1alpha1
-    kind: NooBaa
-    name: noobaa
+    api_version: ocs.openshift.io/v1
+    kind: StorageCluster
     namespace: openshift-storage
-  register: r_noobaa_check
+  register: r_storagecluster_check
   ignore_errors: true
 
-- name: Reduce NooBaa core and endpoint resources
+- name: Reduce NooBaa core resources via StorageCluster
   when:
   - workshop_reduce_noobaa_resources | default(false) | bool
-  - r_noobaa_check.resources | default([]) | length > 0
+  - r_storagecluster_check.resources | default([]) | length > 0
   kubernetes.core.k8s:
     state: patched
-    api_version: noobaa.io/v1alpha1
-    kind: NooBaa
-    name: noobaa
+    api_version: ocs.openshift.io/v1
+    kind: StorageCluster
+    name: "{{ r_storagecluster_check.resources[0].metadata.name }}"
     namespace: openshift-storage
     definition:
       spec:
-        coreResources:
-          requests:
-            cpu: "{{ workshop_noobaa_core_cpu_requests }}"
-            memory: "{{ workshop_noobaa_core_memory_requests }}"
-          limits:
-            cpu: "{{ workshop_noobaa_core_cpu_limits }}"
-            memory: "{{ workshop_noobaa_core_memory_limits }}"
-        endpoints:
-          minCount: 1
-          maxCount: 1
-          resources:
+        resources:
+          noobaa-core:
             requests:
-              cpu: "{{ workshop_noobaa_endpoint_cpu_requests }}"
-              memory: "{{ workshop_noobaa_endpoint_memory_requests }}"
+              cpu: "{{ workshop_noobaa_core_cpu_requests }}"
+              memory: "{{ workshop_noobaa_core_memory_requests }}"
             limits:
-              cpu: "{{ workshop_noobaa_endpoint_cpu_limits }}"
-              memory: "{{ workshop_noobaa_endpoint_memory_limits }}"
-  register: r_noobaa_patch
-  ignore_errors: true
-
-- name: Reduce NooBaa BackingStore resources
-  when:
-  - workshop_reduce_noobaa_resources | default(false) | bool
-  - r_noobaa_check.resources | default([]) | length > 0
-  kubernetes.core.k8s:
-    state: patched
-    api_version: noobaa.io/v1alpha1
-    kind: BackingStore
-    name: noobaa-default-backing-store
-    namespace: openshift-storage
-    definition:
-      spec:
-        pvPool:
-          resources:
-            requests:
-              cpu: "{{ workshop_noobaa_backingstore_cpu_requests }}"
-              memory: "{{ workshop_noobaa_backingstore_memory_requests }}"
-            limits:
-              cpu: "{{ workshop_noobaa_backingstore_cpu_limits }}"
-              memory: "{{ workshop_noobaa_backingstore_memory_limits }}"
-  register: r_backingstore_patch
+              cpu: "{{ workshop_noobaa_core_cpu_limits }}"
+              memory: "{{ workshop_noobaa_core_memory_limits }}"
+        multiCloudGateway:
+          endpoints:
+            minCount: 1
+            maxCount: 1
+            resources:
+              requests:
+                cpu: "{{ workshop_noobaa_endpoint_cpu_requests }}"
+                memory: "{{ workshop_noobaa_endpoint_memory_requests }}"
+              limits:
+                cpu: "{{ workshop_noobaa_endpoint_cpu_limits }}"
+                memory: "{{ workshop_noobaa_endpoint_memory_limits }}"
+  register: r_storagecluster_patch
   ignore_errors: true
 
 - name: "NooBaa resource reduction - results"
   when: workshop_reduce_noobaa_resources | default(false) | bool
   debug:
     msg: >-
-      NooBaa CR {{ 'not found - skipping' if (r_noobaa_check.resources | default([]) | length == 0) else
-      ('patched successfully' if (r_noobaa_patch is defined and r_noobaa_patch is success) else
-      'FAILED to patch: ' + (r_noobaa_patch.msg | default('unknown error'))) }}.
-      BackingStore {{ 'patched successfully' if (r_backingstore_patch is defined and r_backingstore_patch is success) else
-      'FAILED to patch: ' + (r_backingstore_patch.msg | default('unknown error or skipped')) }}.
+      StorageCluster {{ 'not found - skipping' if (r_storagecluster_check.resources | default([]) | length == 0) else
+      ('patched successfully' if (r_storagecluster_patch is defined and r_storagecluster_patch is success) else
+      'FAILED to patch: ' + (r_storagecluster_patch.msg | default('unknown error'))) }}.
 
-- name: Wait for NooBaa operator to reconcile pods with reduced resources
+- name: Wait for NooBaa core pod to get reduced CPU requests
   when:
   - workshop_reduce_noobaa_resources | default(false) | bool
-  - r_noobaa_patch is defined
-  - r_noobaa_patch is success
-  pause:
-    seconds: 30
+  - r_storagecluster_patch is defined
+  - r_storagecluster_patch is success
+  shell: >
+    oc get pod noobaa-core-0 -n openshift-storage
+    -o jsonpath='{.spec.containers[0].resources.requests.cpu}'
+  register: r_noobaa_core_cpu
+  until: r_noobaa_core_cpu.stdout == workshop_noobaa_core_cpu_requests
+  retries: 60
+  delay: 5
+  changed_when: false
+  ignore_errors: true
+
+- name: Wait for NooBaa endpoint pod to get reduced CPU requests
+  when:
+  - workshop_reduce_noobaa_resources | default(false) | bool
+  - r_storagecluster_patch is defined
+  - r_storagecluster_patch is success
+  shell: >
+    oc get pods -n openshift-storage -l noobaa-module=endpoint
+    -o jsonpath='{.items[0].spec.containers[0].resources.requests.cpu}'
+  register: r_noobaa_endpoint_cpu
+  until: r_noobaa_endpoint_cpu.stdout == workshop_noobaa_endpoint_cpu_requests
+  retries: 60
+  delay: 5
+  changed_when: false
+  ignore_errors: true
+
+- name: "NooBaa resource reduction - rollout status"
+  when:
+  - workshop_reduce_noobaa_resources | default(false) | bool
+  - r_storagecluster_patch is defined
+  - r_storagecluster_patch is success
+  debug:
+    msg: >-
+      Core: {{ 'ready (' + r_noobaa_core_cpu.stdout + ')' if (r_noobaa_core_cpu is success) else
+      'TIMEOUT - pod still at ' + (r_noobaa_core_cpu.stdout | default('unknown')) + ' after 5 min' }}.
+      Endpoint: {{ 'ready (' + r_noobaa_endpoint_cpu.stdout + ')' if (r_noobaa_endpoint_cpu is success) else
+      'TIMEOUT - pod still at ' + (r_noobaa_endpoint_cpu.stdout | default('unknown')) + ' after 5 min' }}.
 
 # ==============================================================================
 # LVMS Deployment Section (optional - enabled via workshop_deploy_lvms: true)
