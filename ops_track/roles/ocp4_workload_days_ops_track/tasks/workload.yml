@@ -853,7 +853,7 @@
   - r_storagecluster_patch is defined
   - r_storagecluster_patch is success
   shell: >
-    oc get pods -n openshift-storage -l noobaa-module=endpoint
+    oc get pods -n openshift-storage -l noobaa-s3=noobaa
     -o jsonpath='{.items[0].spec.containers[0].resources.requests.cpu}'
   register: r_noobaa_endpoint_cpu
   until: r_noobaa_endpoint_cpu.stdout == workshop_noobaa_endpoint_cpu_requests
