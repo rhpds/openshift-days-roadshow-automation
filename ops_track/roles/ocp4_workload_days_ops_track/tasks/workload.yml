@@ -750,6 +750,118 @@
   debug:
     msg: "Cluster diagnostics complete. Proceeding with workload setup..."
 
+
+# ==============================================================================
+# NooBaa Resource Reduction (optional - enabled via workshop_reduce_noobaa_resources)
+#
+# On compact clusters (3-node control-plane/worker combo), NooBaa's default
+# CPU requests (~5500m total) consume a large portion of available capacity.
+# Actual usage is ~300m. This patches the NooBaa and BackingStore CRs to
+# reduce requests, freeing room for workloads deployed later (e.g. LokiStack).
+#
+# This runs at workload deploy time so it works regardless of when the
+# cluster pool was built (pool-level fixes only apply to new clusters).
+#
+# To revert: set workshop_reduce_noobaa_resources to false. The NooBaa
+# operator will NOT revert automatically — you would need to manually patch
+# the CRs back or rebuild the cluster.
+# ==============================================================================
+
+- name: "NooBaa resource reduction - check if enabled"
+  debug:
+    msg: >-
+      workshop_reduce_noobaa_resources={{ workshop_reduce_noobaa_resources | default(false) }}.
+      {% if workshop_reduce_noobaa_resources | default(false) | bool %}
+      Will patch NooBaa CR (core={{ workshop_noobaa_core_cpu_requests }},
+      endpoint={{ workshop_noobaa_endpoint_cpu_requests }}) and
+      BackingStore ({{ workshop_noobaa_backingstore_cpu_requests }}).
+      {% else %}
+      Skipping NooBaa resource reduction (not enabled).
+      {% endif %}
+
+- name: Check if NooBaa CR exists
+  when: workshop_reduce_noobaa_resources | default(false) | bool
+  kubernetes.core.k8s_info:
+    api_version: noobaa.io/v1alpha1
+    kind: NooBaa
+    name: noobaa
+    namespace: openshift-storage
+  register: r_noobaa_check
+  ignore_errors: true
+
+- name: Reduce NooBaa core and endpoint resources
+  when:
+  - workshop_reduce_noobaa_resources | default(false) | bool
+  - r_noobaa_check.resources | default([]) | length > 0
+  kubernetes.core.k8s:
+    state: patched
+    api_version: noobaa.io/v1alpha1
+    kind: NooBaa
+    name: noobaa
+    namespace: openshift-storage
+    definition:
+      spec:
+        coreResources:
+          requests:
+            cpu: "{{ workshop_noobaa_core_cpu_requests }}"
+            memory: "{{ workshop_noobaa_core_memory_requests }}"
+          limits:
+            cpu: "{{ workshop_noobaa_core_cpu_limits }}"
+            memory: "{{ workshop_noobaa_core_memory_limits }}"
+        endpoints:
+          minCount: 1
+          maxCount: 1
+          resources:
+            requests:
+              cpu: "{{ workshop_noobaa_endpoint_cpu_requests }}"
+              memory: "{{ workshop_noobaa_endpoint_memory_requests }}"
+            limits:
+              cpu: "{{ workshop_noobaa_endpoint_cpu_limits }}"
+              memory: "{{ workshop_noobaa_endpoint_memory_limits }}"
+  register: r_noobaa_patch
+  ignore_errors: true
+
+- name: Reduce NooBaa BackingStore resources
+  when:
+  - workshop_reduce_noobaa_resources | default(false) | bool
+  - r_noobaa_check.resources | default([]) | length > 0
+  kubernetes.core.k8s:
+    state: patched
+    api_version: noobaa.io/v1alpha1
+    kind: BackingStore
+    name: noobaa-default-backing-store
+    namespace: openshift-storage
+    definition:
+      spec:
+        pvPool:
+          resources:
+            requests:
+              cpu: "{{ workshop_noobaa_backingstore_cpu_requests }}"
+              memory: "{{ workshop_noobaa_backingstore_memory_requests }}"
+            limits:
+              cpu: "{{ workshop_noobaa_backingstore_cpu_limits }}"
+              memory: "{{ workshop_noobaa_backingstore_memory_limits }}"
+  register: r_backingstore_patch
+  ignore_errors: true
+
+- name: "NooBaa resource reduction - results"
+  when: workshop_reduce_noobaa_resources | default(false) | bool
+  debug:
+    msg: >-
+      NooBaa CR {{ 'not found - skipping' if (r_noobaa_check.resources | default([]) | length == 0) else
+      ('patched successfully' if (r_noobaa_patch is defined and r_noobaa_patch is success) else
+      'FAILED to patch: ' + (r_noobaa_patch.msg | default('unknown error'))) }}.
+      BackingStore {{ 'patched successfully' if (r_backingstore_patch is defined and r_backingstore_patch is success) else
+      'FAILED to patch: ' + (r_backingstore_patch.msg | default('unknown error or skipped')) }}.
+
+- name: Wait for NooBaa operator to reconcile pods with reduced resources
+  when:
+  - workshop_reduce_noobaa_resources | default(false) | bool
+  - r_noobaa_patch is defined
+  - r_noobaa_patch is success
+  pause:
+    seconds: 30
+
 # ==============================================================================
 # LVMS Deployment Section (optional - enabled via workshop_deploy_lvms: true)
 # Deploys LVMS operator with optionalPaths for AWS NVMe device handling
