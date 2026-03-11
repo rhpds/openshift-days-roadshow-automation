@@ -9,6 +9,29 @@ _infra_node_instance_type: m5a.4xlarge
 # It gathers cluster metadata and grants cluster-admin permissions
 
 # -------------------------------------------------------------------
+# NooBaa resource reduction (optional)
+# Patches NooBaa and BackingStore CRs to reduce CPU requests on
+# compact clusters where ODF was pre-installed by the cluster pool.
+# The pool may have been built before resource overrides were added,
+# so this ensures the running cluster has reduced requests regardless.
+# Set workshop_reduce_noobaa_resources: true to enable.
+# -------------------------------------------------------------------
+workshop_reduce_noobaa_resources: false
+
+workshop_noobaa_core_cpu_requests: "250m"
+workshop_noobaa_core_cpu_limits: "1"
+workshop_noobaa_core_memory_requests: "1Gi"
+workshop_noobaa_core_memory_limits: "2Gi"
+workshop_noobaa_endpoint_cpu_requests: "200m"
+workshop_noobaa_endpoint_cpu_limits: "1"
+workshop_noobaa_endpoint_memory_requests: "512Mi"
+workshop_noobaa_endpoint_memory_limits: "2Gi"
+workshop_noobaa_backingstore_cpu_requests: "100m"
+workshop_noobaa_backingstore_cpu_limits: "500m"
+workshop_noobaa_backingstore_memory_requests: "256Mi"
+workshop_noobaa_backingstore_memory_limits: "1Gi"
+
+# -------------------------------------------------------------------
 # LVMS Deployment (optional - set workshop_deploy_lvms: true to enable)
 # -------------------------------------------------------------------
 workshop_deploy_lvms: false
