@@ -1,0 +1,34 @@
+---
+# The upstream OLS role creates an OLSConfig because it defaults
+# ocp4_workload_ai_platform: azure. Students need to create this
+# themselves in the Lightspeed lab module. Delete it here so the
+# operator is installed with secrets intact but unconfigured.
+
+- name: Delete OLSConfig created by upstream role
+  kubernetes.core.k8s:
+    api_version: ols.openshift.io/v1alpha1
+    kind: OLSConfig
+    name: cluster
+    state: absent
+  register: r_olsconfig_delete
+  ignore_errors: true
+
+- name: Wait for OLS pods to terminate
+  when: r_olsconfig_delete is changed
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: openshift-lightspeed
+    label_selectors:
+    - app.kubernetes.io/managed-by=lightspeed-operator
+  register: r_ols_pods
+  until: r_ols_pods.resources | length == 0
+  retries: 30
+  delay: 5
+  ignore_errors: true
+
+- name: OLS cleanup status
+  debug:
+    msg: >-
+      OLSConfig {{ 'deleted - operator installed, secrets intact, students will create config manually'
+      if r_olsconfig_delete is changed else 'not found - nothing to clean up' }}.
