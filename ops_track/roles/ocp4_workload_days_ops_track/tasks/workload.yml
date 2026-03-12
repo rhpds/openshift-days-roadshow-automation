@@ -832,6 +832,59 @@
       ('patched successfully' if (r_storagecluster_patch is defined and r_storagecluster_patch is success) else
       'FAILED to patch: ' + (r_storagecluster_patch.msg | default('unknown error'))) }}.
 
+# ==============================================================================
+# BackingStore memory floor (unconditional)
+#
+# MCG 4.20+ rejects BackingStores with memory requests below 400Mi.
+# The pool provisioning may set a lower value (e.g. 256Mi) which causes
+# the BackingStore and BucketClass to enter Rejected phase, breaking
+# any workload that needs ObjectBucketClaims (Quay, OADP, etc.).
+# This runs unconditionally to catch clusters provisioned with bad defaults.
+# ==============================================================================
+- name: Check BackingStore current memory request
+  kubernetes.core.k8s_info:
+    api_version: noobaa.io/v1alpha1
+    kind: BackingStore
+    name: noobaa-default-backing-store
+    namespace: openshift-storage
+  register: r_backingstore_check
+  ignore_errors: true
+
+- name: Patch BackingStore memory to meet MCG minimum
+  when:
+  - r_backingstore_check.resources | default([]) | length > 0
+  - r_backingstore_check.resources[0].status.phase | default('') == 'Rejected'
+  kubernetes.core.k8s:
+    state: patched
+    api_version: noobaa.io/v1alpha1
+    kind: BackingStore
+    name: noobaa-default-backing-store
+    namespace: openshift-storage
+    definition:
+      spec:
+        pvPool:
+          resources:
+            requests:
+              memory: "{{ workshop_noobaa_backingstore_memory_requests }}"
+  register: r_backingstore_patch
+  ignore_errors: true
+
+- name: Wait for BackingStore to become Ready
+  when:
+  - r_backingstore_patch is defined
+  - r_backingstore_patch is changed
+  kubernetes.core.k8s_info:
+    api_version: noobaa.io/v1alpha1
+    kind: BackingStore
+    name: noobaa-default-backing-store
+    namespace: openshift-storage
+  register: r_backingstore_status
+  until:
+  - r_backingstore_status.resources[0].status.phase | default('') == 'Ready'
+  retries: 60
+  delay: 5
+  ignore_errors: true
+
 - name: Wait for NooBaa core pod to get reduced CPU requests
   when:
   - workshop_reduce_noobaa_resources | default(false) | bool
