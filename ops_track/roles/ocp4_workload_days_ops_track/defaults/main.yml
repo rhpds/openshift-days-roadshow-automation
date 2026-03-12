@@ -26,6 +26,11 @@ workshop_noobaa_endpoint_cpu_limits: "1"
 workshop_noobaa_endpoint_memory_requests: "512Mi"
 workshop_noobaa_endpoint_memory_limits: "2Gi"
 
+# BackingStore minimum memory - MCG 4.20+ rejects BackingStores with
+# memory requests below 400Mi. The StorageCluster patch does not control
+# BackingStore pod resources, so we patch the BackingStore CR directly.
+workshop_noobaa_backingstore_memory_requests: "400Mi"
+
 # -------------------------------------------------------------------
 # LVMS Deployment (optional - set workshop_deploy_lvms: true to enable)
 # -------------------------------------------------------------------
