@@ -1,5 +1,8 @@
 ---
-# HCP Cluster Configuration
+# Provisions a Hosted Control Plane cluster on the local KubeVirt infrastructure
+# via ACM. The HCP control plane runs as pods on the hub cluster; there are no
+# separate worker nodes (SingleReplica, no NodePool). This gives the ACM module
+# a real multi-cluster environment to demonstrate fleet management.
 ocp4_workload_create_hcp_cluster_name: managed-hcp
 ocp4_workload_create_hcp_cluster_namespace: clusters
 
@@ -11,7 +14,8 @@ ocp4_workload_create_hcp_cluster_network_cidr: "10.132.0.0/14"
 ocp4_workload_create_hcp_cluster_service_network_cidr: "172.31.0.0/16"
 ocp4_workload_create_hcp_cluster_base_domain: demo.local
 
-# etcd storage
+# etcd storage — agnosticv overrides this to ocs-external-storagecluster-ceph-rbd-immediate
+# to avoid WaitForFirstConsumer PVC deadlock on multinode external Ceph
 ocp4_workload_create_hcp_cluster_etcd_storage_size: 8Gi
 ocp4_workload_create_hcp_cluster_etcd_storage_class: ocs-storagecluster-ceph-rbd
 

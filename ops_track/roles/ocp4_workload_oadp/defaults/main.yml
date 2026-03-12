@@ -73,7 +73,7 @@ ocp4_workload_oadp_use_catalog_snapshot: false
 
 # Catalog Source Name when using a catalog snapshot. This should be unique
 # in the cluster to avoid clashes
-ocp4_workload_oadp_catalogsource_name: redhat-operators-snapshot-nmstate
+ocp4_workload_oadp_catalogsource_name: redhat-operators-snapshot-oadp
 
 # Catalog snapshot image
 ocp4_workload_oadp_catalog_snapshot_image: quay.io/gpte-devops-automation/olm_snapshot_redhat_catalog

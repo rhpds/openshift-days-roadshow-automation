@@ -1,8 +1,13 @@
 ---
-# The upstream OLS role creates an OLSConfig because it defaults
-# ocp4_workload_ai_platform: azure. Students need to create this
-# themselves in the Lightspeed lab module. Delete it here so the
-# operator is installed with secrets intact but unconfigured.
+# The upstream OLS role (agnosticd.ai_workloads.ocp4_workload_ols) defaults
+# ocp4_workload_ai_platform: azure which creates an OLSConfig automatically.
+# We can't undefine that variable from agnosticv (role defaults always apply).
+# Instead, this cleanup role runs immediately after OLS and deletes the
+# OLSConfig. What remains on the cluster:
+#   - Operator: installed and running (lightspeed-operator CSV)
+#   - Secret: azure-api-keys with Azure OpenAI credentials
+#   - Namespace: openshift-lightspeed
+# Students follow openshift-lightspeed.adoc to create the OLSConfig manually.
 
 - name: Delete OLSConfig created by upstream role
   kubernetes.core.k8s:

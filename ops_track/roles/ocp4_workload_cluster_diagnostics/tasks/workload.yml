@@ -422,7 +422,7 @@
       NAMESPACE:.metadata.namespace,\
       NAME:.metadata.name,\
       STATUS:.status.phase,\
-      STORAGECLASS:.spec.storageClassName 2>/dev/null
+      STORAGECLASS:.spec.storageClassName 2>/dev/null || true
     done
   register: diag_hcp
   ignore_errors: true
