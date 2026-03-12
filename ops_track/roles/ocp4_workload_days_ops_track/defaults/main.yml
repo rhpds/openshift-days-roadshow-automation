@@ -2,33 +2,36 @@
 ocp_username: admin
 silent: false
 
-_infra_node_replicas: 3
-_infra_node_instance_type: m5a.4xlarge
-
-# Note: This role now works with Showroom instead of Homeroom
-# It gathers cluster metadata and grants cluster-admin permissions
+# Main workshop setup role — gathers cluster metadata, grants cluster-admin,
+# configures Showroom, reduces NooBaa/BackingStore resources, and deploys
+# optional components (LVMS, OLS demo pod).
 
 # -------------------------------------------------------------------
 # NooBaa resource reduction (optional)
-# Patches the StorageCluster CR to reduce NooBaa CPU requests on
-# compact clusters where ODF was pre-installed by the cluster pool.
-# The OCS operator propagates these to the NooBaa CR and pods.
+# Patches the StorageCluster CR to reduce NooBaa core and endpoint CPU/memory.
+# The propagation chain is:
+#   StorageCluster → OCS operator → NooBaa CR → NooBaa operator → pods
+# Direct patches to NooBaa CR or pods are reverted by the operators.
 # Set workshop_reduce_noobaa_resources: true to enable.
 # -------------------------------------------------------------------
 workshop_reduce_noobaa_resources: false
 
+# Core pod (noobaa-core-0 StatefulSet)
 workshop_noobaa_core_cpu_requests: "250m"
 workshop_noobaa_core_cpu_limits: "1"
 workshop_noobaa_core_memory_requests: "1Gi"
 workshop_noobaa_core_memory_limits: "2Gi"
+
+# Endpoint pod (noobaa-endpoint Deployment)
 workshop_noobaa_endpoint_cpu_requests: "200m"
 workshop_noobaa_endpoint_cpu_limits: "1"
 workshop_noobaa_endpoint_memory_requests: "512Mi"
 workshop_noobaa_endpoint_memory_limits: "2Gi"
 
-# BackingStore minimum memory - MCG 4.20+ rejects BackingStores with
-# memory requests below 400Mi. The StorageCluster patch does not control
-# BackingStore pod resources, so we patch the BackingStore CR directly.
+# BackingStore minimum memory (unconditional — not gated by the flag above)
+# MCG 4.20+ rejects BackingStores with memory requests below 400Mi.
+# The StorageCluster patch does not control BackingStore pod resources,
+# so we patch the BackingStore CR directly if it's in Rejected phase.
 workshop_noobaa_backingstore_memory_requests: "400Mi"
 
 # -------------------------------------------------------------------

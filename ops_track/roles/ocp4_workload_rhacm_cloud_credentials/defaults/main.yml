@@ -1,8 +1,11 @@
 ---
+# Creates cloud provider credentials in ACM for provisioning managed clusters.
+# Supports Azure, AWS, and KubeVirt providers. The workshop uses KubeVirt
+# to provision HCP clusters on the local CNV infrastructure.
 ocp_username: admin
 silent: false
 
-# Common variables
+# Common variables (overridden by secrets includes in agnosticv)
 ocp4_token: CHANGEME
 ssh_privatekey: CHANGEME
 ssh_publickey: CHANGEME
@@ -30,6 +33,8 @@ ocp4_base_domain: CHANGEME
 # AWS ACM namespace (optional)
 # aws_acm_secret_namespace: CHANGEME
 
-# kubevirt credentials
+# KubeVirt credentials — creates a provider secret using the cluster's
+# own kubeconfig so ACM can provision HCP clusters on local CNV.
+# Also installs the hcp CLI when install_hcp_cli is true.
 ocp4_workload_rhacm_cloud_credentials_kubevirt: false
 ocp4_workload_rhacm_cloud_credentials_kubevirt_secret_name: kubevirt-secret

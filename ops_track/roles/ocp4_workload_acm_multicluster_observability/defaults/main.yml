@@ -1,12 +1,8 @@
 ---
+# Deploys ACM MultiCluster Observability with Thanos-based metrics
+# collection across managed clusters. Uses NooBaa (OBC) for object storage.
 ocp_username: admin
 silent: false
-
-##---------------------------------------------##
-## OCP hub cluster key/api url
-##---------------------------------------------##
-#ocp_key_hub: CHANGEME
-#ocp_hub_api_url: CHANGEME
 
 ## MultiCluster Observability related variables ##
 ocp4_workload_acm_multicluster_observability_namespace: open-cluster-management-observability

@@ -1,13 +1,15 @@
 # OpenShift Days: Ops Track Collection
 
-Ansible collection for deploying the OpenShift Days Ops Track Workshop.
+Ansible collection for deploying the OpenShift Days Ops Track Workshop on CNV multi-cluster environments.
+
+Deployed via agnosticv catalog item `agd_v2/openshift-days-ops-track-cnv`. The workshop connects to a pre-existing OCP cluster from a CNV pool and installs all workloads on top.
 
 ## Roles
 
 ### Workshop Core
-- `ocp4_workload_days_ops_track` - Workshop orchestrator: kubeconfig setup, cluster metadata extraction, diagnostics, Showroom configuration (patches deployment with workshop variables, rebuilds Antora site, CLI tools setup)
-- `ocp4_workload_cluster_diagnostics` - End-of-deployment comprehensive cluster diagnostics (operator status, pod health, storage, networking)
-- `ocp4_workload_kubernetes_image_puller` - Pre-pull workshop container images to nodes
+- `ocp4_workload_days_ops_track` - Main workshop setup: cluster metadata, Showroom configuration (injects variables, rebuilds Antora site), NooBaa/BackingStore resource reduction, OLS demo pod, optional LVMS deployment
+- `ocp4_workload_cluster_diagnostics` - End-of-deployment diagnostics: nodes, operators, storage, pods, events, HCP status. Runs last, all tasks use `ignore_errors` so failures never block deployment
+- `ocp4_workload_kubernetes_image_puller` - Pre-pulls container images to worker nodes so exercises don't wait for image pulls
 
 ### RHACS (Advanced Cluster Security)
 - `ocp4_workload_rhacs` - Original ops_track copy with hardcoded resource reductions (deprecated, kept for reference)
@@ -20,20 +22,23 @@ Ansible collection for deploying the OpenShift Days Ops Track Workshop.
 > **Note:** The v2 roles exist temporarily while the upstream core_workloads PR is under review. Once merged, the v2 copies and the original ops_track copies will be removed and the workshop will use the upstream roles directly with override variables set in agnosticv.
 
 ### Multi-Cluster & ACM
-- `ocp4_workload_rhacm_cloud_credentials` - ACM cloud credentials for KubeVirt provider
-- `ocp4_workload_acm_multicluster_observability` - ACM multi-cluster observability
-- `ocp4_workload_hcp_kubevirt` - Hosted Control Planes on KubeVirt
-- `ocp4_workload_create_hcp_cluster` - Pre-provision a managed HCP cluster
+- `ocp4_workload_rhacm_cloud_credentials` - Creates KubeVirt provider credentials in ACM and installs the hcp CLI, enabling ACM to provision HCP clusters on the local CNV infrastructure
+- `ocp4_workload_acm_multicluster_observability` - ACM MultiCluster Observability with Thanos-based metrics. Supports compact resource mode for resource-constrained clusters
+- `ocp4_workload_hcp_kubevirt` - Patches the default IngressController to accept wildcard routes (required for HCP cluster API/console access)
+- `ocp4_workload_create_hcp_cluster` - Provisions a managed HCP cluster on KubeVirt so the ACM module has a real multi-cluster environment
 
 ### Day 2 Operations
-- `ocp4_days_workload_compliance_operator` - Compliance Operator installation
-- `ocp4_workload_oadp` - OADP Backup/Restore operator
+- `ocp4_days_workload_compliance_operator` - Installs the Compliance Operator for CIS/NIST scanning in the security module
+- `ocp4_workload_oadp` - Installs OADP operator (DPA not pre-configured — students set it up in the backup-restore module using NooBaa for S3 storage)
 
 ### Developer Experience
-- `ocp4_days_workload_rhdh` - Red Hat Developer Hub (simplified deployment)
+- `ocp4_days_workload_rhdh` - Red Hat Developer Hub with guest auth (no complex identity setup needed for single-user workshops)
+
+### OpenShift Lightspeed
+- `ocp4_workload_ols_cleanup` - Deletes the OLSConfig created by the upstream OLS role so students create it manually in the lab module. The upstream role defaults `ocp4_workload_ai_platform: azure` which we can't override. Operator and Azure credentials secret remain intact
 
 ### Temporary Copies (from upstream core_workloads)
-These are unmodified copies of upstream roles that were needed when upstream had issues. They should be removed once no longer required.
+Unmodified copies of upstream roles, used when upstream had issues. Should be removed once no longer required.
 - `ocp4_workload_metallb_temp`
 - `ocp4_workload_openshift_gitops_temp`
 - `ocp4_workload_openshift_virtualization_temp`
