@@ -35,6 +35,22 @@ workshop_noobaa_endpoint_memory_limits: "2Gi"
 workshop_noobaa_backingstore_memory_requests: "400Mi"
 
 # -------------------------------------------------------------------
+# Prometheus retention reduction (optional)
+# Default Prometheus runs 15-day retention and each instance uses ~5 GiB
+# RSS. Reducing to 2d cuts memory by ~2 GiB per instance (~4 GiB total).
+# For a 1-2 day workshop, 2d retention is more than enough.
+#
+# This merges into the existing cluster-monitoring-config ConfigMap
+# (which may already contain enableUserWorkload and ACM alertmanager
+# config). The monitoring operator rolls out Prometheus automatically.
+#
+# Note: Prometheus replicas cannot be changed via ConfigMap in OCP 4.20
+# (the CMO webhook rejects the field). Replicas remain at the default 2.
+# -------------------------------------------------------------------
+workshop_reduce_prometheus_retention: false
+workshop_prometheus_retention: "2d"
+
+# -------------------------------------------------------------------
 # LVMS Deployment (optional - set workshop_deploy_lvms: true to enable)
 # -------------------------------------------------------------------
 workshop_deploy_lvms: false

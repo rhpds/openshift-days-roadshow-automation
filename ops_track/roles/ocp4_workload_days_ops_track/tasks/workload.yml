@@ -752,6 +752,74 @@
 
 
 # ==============================================================================
+# Prometheus Retention Reduction (optional - enabled via workshop_reduce_prometheus_retention)
+#
+# Default Prometheus keeps 15 days of metrics. Each instance uses ~5 GiB RSS
+# on a busy cluster. Reducing retention to 2d saves ~2 GiB per instance
+# (~4 GiB total) by loading fewer TSDB blocks.
+#
+# This merges retention into the existing cluster-monitoring-config ConfigMap.
+# The ConfigMap may already contain enableUserWorkload (from the deployer) and
+# additionalAlertmanagerConfigs (from ACM MCO). We read the current config,
+# merge our value, and write it back to avoid clobbering anything.
+#
+# Note: Prometheus replicas cannot be changed via ConfigMap in OCP 4.20
+# (the CMO webhook rejects the field).
+# ==============================================================================
+
+- name: "Prometheus retention reduction - check if enabled"
+  debug:
+    msg: >-
+      workshop_reduce_prometheus_retention={{ workshop_reduce_prometheus_retention | default(false) }}.
+      {% if workshop_reduce_prometheus_retention | default(false) | bool %}
+      Will set retention={{ workshop_prometheus_retention }}.
+      {% else %}
+      Skipping Prometheus retention reduction (not enabled).
+      {% endif %}
+
+- name: Get current cluster-monitoring-config
+  when: workshop_reduce_prometheus_retention | default(false) | bool
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: ConfigMap
+    name: cluster-monitoring-config
+    namespace: openshift-monitoring
+  register: r_monitoring_config
+
+- name: Merge Prometheus retention into cluster-monitoring-config
+  when: workshop_reduce_prometheus_retention | default(false) | bool
+  vars:
+    _existing_config: >-
+      {{ (r_monitoring_config.resources[0].data['config.yaml'] | default('{}')) | from_yaml }}
+    _existing_prom: >-
+      {{ _existing_config.prometheusK8s | default({}) }}
+    _merged_prom: >-
+      {{ _existing_prom | combine({'retention': workshop_prometheus_retention}) }}
+    _merged_config: >-
+      {{ _existing_config | combine({'prometheusK8s': _merged_prom}) }}
+  kubernetes.core.k8s:
+    state: present
+    api_version: v1
+    kind: ConfigMap
+    name: cluster-monitoring-config
+    namespace: openshift-monitoring
+    definition:
+      data:
+        config.yaml: "{{ _merged_config | to_nice_yaml }}"
+  register: r_monitoring_config_patch
+  ignore_errors: true
+
+- name: "Prometheus retention reduction - result"
+  when:
+  - workshop_reduce_prometheus_retention | default(false) | bool
+  - r_monitoring_config_patch is defined
+  debug:
+    msg: >-
+      {{ 'cluster-monitoring-config patched: retention=' + workshop_prometheus_retention
+      if r_monitoring_config_patch is success
+      else 'FAILED: ' + (r_monitoring_config_patch.msg | default('unknown error')) }}
+
+# ==============================================================================
 # NooBaa Resource Reduction (optional - enabled via workshop_reduce_noobaa_resources)
 #
 # On compact clusters (3-node control-plane/worker combo), NooBaa's default
