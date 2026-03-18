@@ -35,6 +35,10 @@
     install_operator_catalogsource_name: "{{ ocp4_days_workload_compliance_operator_catalogsource_name }}"
     install_operator_catalogsource_image: "{{ ocp4_days_workload_compliance_operator_catalog_snapshot_image }}"
     install_operator_catalogsource_image_tag: "{{ ocp4_days_workload_compliance_operator_catalog_snapshot_image_tag }}"
+    # On busy compact clusters the CSV can take >15 min to reach Succeeded,
+    # exceeding the upstream role's timeout. Let it fail silently — our own
+    # deployment wait (below) gives it another 10 minutes to come up.
+    install_operator_install_csv_ignore_error: true
 
 - name: Get Subscription status
   kubernetes.core.k8s_info:
