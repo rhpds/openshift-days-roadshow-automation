@@ -1,5 +1,16 @@
 ---
-# Ensure namespace exists (moved from pre_workload)
+# ==============================================================================
+# Compliance Operator Workload
+#
+# Installs the compliance operator if not already present. On clusters with ACM
+# enabled, the prepare_hcp role (sovereign_cloud collection) deploys the
+# compliance operator via an ACM OperatorPolicy. In that case, this role skips
+# the install and just waits for everything to be ready.
+#
+# When ACM is not enabled (security module only), this role handles the full
+# install via the upstream install_operator role.
+# ==============================================================================
+
 - name: Ensure openshift-compliance namespace exists
   kubernetes.core.k8s:
     state: present
@@ -11,18 +22,27 @@
   retries: 10
   delay: 5
 
-- name: Setting up Compliance Operator workload
-  ansible.builtin.debug:
-    msg: "Setting up Compliance Operator workload"
+- name: Check if compliance operator is already installed (e.g. by ACM policy)
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    name: compliance-operator
+    namespace: "{{ ocp4_days_workload_compliance_operator_namespace }}"
+  register: r_existing_subscription
 
-- name: DEBUG - Show configuration
+- name: DEBUG - Existing installation check
   ansible.builtin.debug:
-    msg:
-      - "Namespace: {{ ocp4_days_workload_compliance_operator_namespace }}"
-      - "Channel: {{ ocp4_days_workload_compliance_operator_channel }}"
-      - "Use Catalog Snapshot: {{ ocp4_days_workload_compliance_operator_use_catalog_snapshot }}"
+    msg: >-
+      {{ 'Compliance operator already installed (likely via ACM policy) — skipping install_operator'
+      if r_existing_subscription.resources | length > 0
+      else 'No existing installation found — installing via install_operator role' }}
 
+# Only call install_operator if the subscription doesn't already exist.
+# When ACM is enabled, prepare_hcp creates the subscription via OperatorPolicy.
+# Calling install_operator on top of that creates a duplicate OperatorGroup,
+# which causes the CSV to fail with TooManyOperatorGroups.
 - name: Install Compliance Operator
+  when: r_existing_subscription.resources | length == 0
   ansible.builtin.include_role:
     name: install_operator
   vars:
@@ -40,6 +60,8 @@
     # deployment wait (below) gives it another 10 minutes to come up.
     install_operator_install_csv_ignore_error: true
 
+# From here on, wait for the operator to be ready regardless of how it was installed.
+
 - name: Get Subscription status
   kubernetes.core.k8s_info:
     api_version: operators.coreos.com/v1alpha1
@@ -55,8 +77,6 @@
       - "Installed CSV: {{ r_subscription.resources[0].status.installedCSV | default('not yet') }}"
       - "State: {{ r_subscription.resources[0].status.state | default('unknown') }}"
   when: r_subscription.resources | length > 0
-
-# NOTE: OperatorGroup is created by install_operator role - do not duplicate
 
 - name: Wait for Compliance Operator deployment to be ready
   kubernetes.core.k8s_info:
