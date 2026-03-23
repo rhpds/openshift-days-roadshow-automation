@@ -1,0 +1,81 @@
+---
+# ==============================================================================
+# CLUSTER CLEANUP
+# 1. Disables unused default OLM catalog sources to stop image churn
+# 2. Prunes unused container images from all nodes
+#
+# Compact 3-node clusters with many operators accumulate 60+ GB of stale
+# container images from OLM catalog refreshes and operator upgrades. On 100GB
+# disks the default kubelet GC threshold (85%) is too high — pods get evicted
+# before GC kicks in (e.g. ACS scanner-db).
+#
+# This role should run BEFORE heavy workloads like ACS that are sensitive
+# to disk pressure.
+# ==============================================================================
+
+# ==============================================================================
+# PHASE 1: Disable unused catalog sources
+# The default certified-operators and redhat-marketplace catalogs serve zero
+# subscriptions in this workshop but each one pulls ~1.2 GB index images that
+# refresh periodically, leaving stale copies on every node.
+# ==============================================================================
+
+- name: Build catalog sources patch
+  set_fact:
+    _catalog_sources_patch: "{{ ocp4_workload_cluster_cleanup_disable_catalogs | map('regex_replace', '^(.*)$', '{\"name\":\"\\1\",\"disabled\":true}') | list }}"
+  ignore_errors: true
+
+- name: Disable unused default catalog sources
+  shell: >-
+    oc patch operatorhub cluster --type merge
+    -p '{"spec":{"sources":[{{ _catalog_sources_patch | join(",") }}]}}'
+  ignore_errors: true
+
+- name: Wait for disabled catalog source pods to terminate
+  shell: |
+    for catalog in {{ ocp4_workload_cluster_cleanup_disable_catalogs | join(' ') }}; do
+      echo "Disabling ${catalog}..."
+      timeout 60 bash -c "while oc get pods -n openshift-marketplace -l olm.catalogOperator.version --no-headers 2>/dev/null | grep -q ${catalog}; do sleep 5; done" || true
+    done
+    echo "Done"
+  ignore_errors: true
+
+# ==============================================================================
+# PHASE 2: Prune unused container images
+# crictl rmi --prune only removes images not referenced by any running
+# container, so this is safe to run at any point during deployment.
+# ==============================================================================
+
+- name: Get list of cluster nodes
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+  register: r_nodes
+  ignore_errors: true
+
+- name: Prune unused container images on each node
+  shell: |
+    DISK_BEFORE=$(oc debug node/{{ item }} -- chroot /host df -h /var 2>/dev/null | tail -1)
+    PRUNE_OUTPUT=$(oc debug node/{{ item }} -- chroot /host crictl rmi --prune 2>&1)
+    DELETED=$(echo "${PRUNE_OUTPUT}" | grep -c "^Deleted:" || true)
+    sleep 5
+    DISK_AFTER=$(oc debug node/{{ item }} -- chroot /host df -h /var 2>/dev/null | tail -1)
+    echo "Node: {{ item }}"
+    echo "  Before: ${DISK_BEFORE}"
+    echo "  Pruned: ${DELETED} images"
+    echo "  After:  ${DISK_AFTER}"
+  loop: "{{ r_nodes.resources | map(attribute='metadata.name') | list }}"
+  loop_control:
+    label: "{{ item }}"
+  register: r_image_prune
+  ignore_errors: true
+  when: r_nodes is succeeded
+
+- name: Display image prune results
+  debug:
+    msg: "{{ item.stdout_lines | default(['skipped']) }}"
+  loop: "{{ r_image_prune.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('unknown') }}"
+  when: r_image_prune is defined
+  ignore_errors: true
