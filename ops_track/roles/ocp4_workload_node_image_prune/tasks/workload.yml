@@ -1,0 +1,46 @@
+---
+# ==============================================================================
+# NODE IMAGE PRUNE
+# Removes unused container images to prevent ephemeral storage evictions.
+# Compact 3-node clusters with many operators accumulate 60+ GB of stale
+# images from OLM catalog refreshes and operator upgrades. On 100GB disks
+# this causes pod evictions before kubelet GC kicks in at 85%.
+#
+# This role should run BEFORE heavy workloads like ACS that are sensitive
+# to disk pressure. crictl rmi --prune only removes images not referenced
+# by any running container.
+# ==============================================================================
+
+- name: Get list of cluster nodes
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+  register: r_nodes
+  ignore_errors: true
+
+- name: Prune unused container images on each node
+  shell: |
+    DISK_BEFORE=$(oc debug node/{{ item }} -- chroot /host df -h /var 2>/dev/null | tail -1)
+    PRUNE_OUTPUT=$(oc debug node/{{ item }} -- chroot /host crictl rmi --prune 2>&1)
+    DELETED=$(echo "${PRUNE_OUTPUT}" | grep -c "^Deleted:" || true)
+    sleep 5
+    DISK_AFTER=$(oc debug node/{{ item }} -- chroot /host df -h /var 2>/dev/null | tail -1)
+    echo "Node: {{ item }}"
+    echo "  Before: ${DISK_BEFORE}"
+    echo "  Pruned: ${DELETED} images"
+    echo "  After:  ${DISK_AFTER}"
+  loop: "{{ r_nodes.resources | map(attribute='metadata.name') | list }}"
+  loop_control:
+    label: "{{ item }}"
+  register: r_image_prune
+  ignore_errors: true
+  when: r_nodes is succeeded
+
+- name: Display image prune results
+  debug:
+    msg: "{{ item.stdout_lines | default(['skipped']) }}"
+  loop: "{{ r_image_prune.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item | default('unknown') }}"
+  when: r_image_prune is defined
+  ignore_errors: true

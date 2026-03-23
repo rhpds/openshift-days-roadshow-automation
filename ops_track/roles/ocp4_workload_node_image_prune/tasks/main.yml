@@ -1,0 +1,9 @@
+---
+- name: Prune unused container images from nodes
+  when: ACTION == "provision"
+  ansible.builtin.include_tasks: workload.yml
+
+- name: Skip image prune on destroy
+  when: ACTION == "destroy"
+  debug:
+    msg: "Skipping image prune on destroy"
