@@ -1214,35 +1214,58 @@
 # ==============================================================================
 - name: DEBUG - Showroom Deployment structure before patching
   shell: |
+    NS="{{ showroom_namespace }}"
     echo "=== DEPLOYMENT OVERVIEW ==="
-    oc get deployment showroom -n {{ showroom_namespace }} -o wide 2>&1 || true
+    oc get deployment showroom -n $NS -o wide 2>&1 || true
     echo ""
     echo "=== CONTAINERS ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o jsonpath='{range .spec.template.spec.containers[*]}container: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('containers',[]):
+        print(f\"container: {c['name']}  image: {c.get('image','N/A')}  mem_limit: {c.get('resources',{}).get('limits',{}).get('memory','unset')}\")" 2>&1 || true
     echo ""
     echo "=== INIT CONTAINERS ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o jsonpath='{range .spec.template.spec.initContainers[*]}initContainer: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('initContainers',[]):
+        print(f\"initContainer: {c['name']}  image: {c.get('image','N/A')}\")" 2>&1 || true
     echo ""
     echo "=== VOLUMES ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
+    oc get deployment showroom -n $NS \
       -o jsonpath='{range .spec.template.spec.volumes[*]}volume: {.name}{"\n"}{end}' 2>&1 || true
     echo ""
     echo "=== CONTAINER VOLUME MOUNTS ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .volumeMounts}}`}}  mount: {{`{{.name}}`}} -> {{`{{.mountPath}}`}}{{`{{if .subPath}}`}} (subPath: {{`{{.subPath}}`}}){{`{{end}}`}}{{`{{if .readOnly}}`}} [readOnly]{{`{{end}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('containers',[]):
+        print(f\"container: {c['name']}\")
+        for m in c.get('volumeMounts',[]):
+            sp = f\" (subPath: {m['subPath']})\" if 'subPath' in m else ''
+            ro = ' [readOnly]' if m.get('readOnly') else ''
+            print(f\"  mount: {m['name']} -> {m['mountPath']}{sp}{ro}\")" 2>&1 || true
     echo ""
     echo "=== INIT CONTAINER VOLUME MOUNTS ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o go-template='{{`{{range .spec.template.spec.initContainers}}`}}initContainer: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .volumeMounts}}`}}  mount: {{`{{.name}}`}} -> {{`{{.mountPath}}`}}{{`{{if .subPath}}`}} (subPath: {{`{{.subPath}}`}}){{`{{end}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('initContainers',[]):
+        print(f\"initContainer: {c['name']}\")
+        for m in c.get('volumeMounts',[]):
+            sp = f\" (subPath: {m['subPath']})\" if 'subPath' in m else ''
+            print(f\"  mount: {m['name']} -> {m['mountPath']}{sp}\")" 2>&1 || true
     echo ""
     echo "=== CONTAINER ENV/ENVFROM ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .env}}`}}  env: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{range .envFrom}}`}}  envFrom: configMapRef={{`{{.configMapRef.name}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('containers',[]):
+        print(f\"container: {c['name']}\")
+        for e in c.get('env',[]):
+            print(f\"  env: {e['name']}\")
+        for ef in c.get('envFrom',[]):
+            ref = ef.get('configMapRef',{}).get('name','?')
+            print(f\"  envFrom: configMapRef={ref}\")" 2>&1 || true
     echo ""
     echo "=== POD STATUS ==="
-    oc get pods -n {{ showroom_namespace }} -o wide 2>&1 || true
+    oc get pods -n $NS -o wide 2>&1 || true
   register: showroom_pre_patch_debug
   ignore_errors: true
 
@@ -1328,6 +1351,11 @@
               envFrom:
               - configMapRef:
                   name: workshop-vars
+              resources:
+                limits:
+                  memory: 512Mi
+                requests:
+                  memory: 256Mi
               volumeMounts:
               - name: antora-cache
                 mountPath: /opt/app-root/src/.cache
@@ -1344,30 +1372,46 @@
 
 - name: DEBUG - Showroom Deployment structure after patching
   shell: |
+    NS="{{ showroom_namespace }}"
     echo "=== POST-PATCH DEPLOYMENT STATE ==="
     echo ""
     echo "=== CONTAINERS (should include original + patched) ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o jsonpath='{range .spec.template.spec.containers[*]}container: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('containers',[]):
+        print(f\"container: {c['name']}  image: {c.get('image','N/A')}  mem_limit: {c.get('resources',{}).get('limits',{}).get('memory','unset')}\")" 2>&1 || true
     echo ""
     echo "=== VOLUMES (should include originals + antora-cache + npm-cache) ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
+    oc get deployment showroom -n $NS \
       -o jsonpath='{range .spec.template.spec.volumes[*]}volume: {.name}{"\n"}{end}' 2>&1 || true
     echo ""
     echo "=== CONTAINER VOLUME MOUNTS (verify merge, not replace) ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .volumeMounts}}`}}  mount: {{`{{.name}}`}} -> {{`{{.mountPath}}`}}{{`{{if .subPath}}`}} (subPath: {{`{{.subPath}}`}}){{`{{end}}`}}{{`{{if .readOnly}}`}} [readOnly]{{`{{end}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('containers',[]):
+        print(f\"container: {c['name']}\")
+        for m in c.get('volumeMounts',[]):
+            sp = f\" (subPath: {m['subPath']})\" if 'subPath' in m else ''
+            ro = ' [readOnly]' if m.get('readOnly') else ''
+            print(f\"  mount: {m['name']} -> {m['mountPath']}{sp}{ro}\")" 2>&1 || true
     echo ""
     echo "=== ENVFROM (should show workshop-vars on nginx, content, wetty) ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .envFrom}}`}}  envFrom: configMapRef={{`{{.configMapRef.name}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('containers',[]):
+        print(f\"container: {c['name']}\")
+        for ef in c.get('envFrom',[]):
+            ref = ef.get('configMapRef',{}).get('name','?')
+            print(f\"  envFrom: configMapRef={ref}\")" 2>&1 || true
     echo ""
     echo "=== INIT CONTAINERS (should be unchanged) ==="
-    oc get deployment showroom -n {{ showroom_namespace }} \
-      -o jsonpath='{range .spec.template.spec.initContainers[*]}initContainer: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    oc get deployment showroom -n $NS -o json | python3 -c "
+    import json,sys; d=json.load(sys.stdin)
+    for c in d['spec']['template']['spec'].get('initContainers',[]):
+        print(f\"initContainer: {c['name']}  image: {c.get('image','N/A')}\")" 2>&1 || true
     echo ""
     echo "=== POD STATUS (new pod rolling out) ==="
-    oc get pods -n {{ showroom_namespace }} -o wide 2>&1 || true
+    oc get pods -n $NS -o wide 2>&1 || true
   register: showroom_post_patch_debug
   ignore_errors: true
 
