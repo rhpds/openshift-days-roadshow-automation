@@ -1210,12 +1210,101 @@
       data: "{{ workshop_vars }}"
 
 # ==============================================================================
+# Pre-patch diagnostics - dump the Deployment structure before we touch it
+# ==============================================================================
+- name: DEBUG - Showroom Deployment structure before patching
+  shell: |
+    echo "=== DEPLOYMENT OVERVIEW ==="
+    oc get deployment showroom -n {{ showroom_namespace }} -o wide 2>&1 || true
+    echo ""
+    echo "=== CONTAINERS ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{range .spec.template.spec.containers[*]}container: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    echo ""
+    echo "=== INIT CONTAINERS ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{range .spec.template.spec.initContainers[*]}initContainer: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    echo ""
+    echo "=== VOLUMES ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{range .spec.template.spec.volumes[*]}volume: {.name}{"\n"}{end}' 2>&1 || true
+    echo ""
+    echo "=== CONTAINER VOLUME MOUNTS ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .volumeMounts}}`}}  mount: {{`{{.name}}`}} -> {{`{{.mountPath}}`}}{{`{{if .subPath}}`}} (subPath: {{`{{.subPath}}`}}){{`{{end}}`}}{{`{{if .readOnly}}`}} [readOnly]{{`{{end}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    echo ""
+    echo "=== INIT CONTAINER VOLUME MOUNTS ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o go-template='{{`{{range .spec.template.spec.initContainers}}`}}initContainer: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .volumeMounts}}`}}  mount: {{`{{.name}}`}} -> {{`{{.mountPath}}`}}{{`{{if .subPath}}`}} (subPath: {{`{{.subPath}}`}}){{`{{end}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    echo ""
+    echo "=== CONTAINER ENV/ENVFROM ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .env}}`}}  env: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{range .envFrom}}`}}  envFrom: configMapRef={{`{{.configMapRef.name}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    echo ""
+    echo "=== POD STATUS ==="
+    oc get pods -n {{ showroom_namespace }} -o wide 2>&1 || true
+  register: showroom_pre_patch_debug
+  ignore_errors: true
+
+- name: Display Showroom pre-patch structure
+  debug:
+    msg: "{{ showroom_pre_patch_debug.stdout_lines | default(['no output']) }}"
+  ignore_errors: true
+
+- name: DEBUG - Verify patch prerequisites exist
+  shell: |
+    echo "=== CHECKING PATCH PREREQUISITES ==="
+    echo ""
+    echo "--- ConfigMap workshop-vars ---"
+    oc get configmap workshop-vars -n {{ showroom_namespace }} -o jsonpath='{.data}' 2>&1 | head -c 500 || echo "NOT FOUND"
+    echo ""
+    echo ""
+    echo "--- ConfigMap workshop-env ---"
+    oc get configmap workshop-env -n {{ showroom_namespace }} 2>&1 || echo "NOT FOUND"
+    echo ""
+    echo "--- Volume showroom-files exists in deployment? ---"
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{.spec.template.spec.volumes[?(@.name=="showroom-files")].name}' 2>&1 || true
+    RESULT=$(oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{.spec.template.spec.volumes[?(@.name=="showroom-files")].name}' 2>/dev/null)
+    if [ "$RESULT" = "showroom-files" ]; then
+      echo "FOUND"
+    else
+      echo "WARNING: volume 'showroom-files' not found in deployment - patch will fail!"
+      echo "Available volumes:"
+      oc get deployment showroom -n {{ showroom_namespace }} \
+        -o jsonpath='{range .spec.template.spec.volumes[*]}{.name}{"\n"}{end}' 2>&1
+    fi
+    echo ""
+    echo "--- Expected containers exist? ---"
+    for CNAME in nginx content wetty; do
+      FOUND=$(oc get deployment showroom -n {{ showroom_namespace }} \
+        -o jsonpath="{.spec.template.spec.containers[?(@.name==\"$CNAME\")].name}" 2>/dev/null)
+      if [ "$FOUND" = "$CNAME" ]; then
+        echo "container '$CNAME': FOUND"
+      else
+        echo "WARNING: container '$CNAME' NOT FOUND - patch may fail!"
+      fi
+    done
+    echo ""
+    echo "--- Helm chart version (from labels/annotations) ---"
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='chart={.metadata.labels.helm\.sh/chart}{"\n"}appVersion={.metadata.labels.app\.kubernetes\.io/version}{"\n"}' 2>&1 || true
+  register: showroom_prereq_debug
+  ignore_errors: true
+
+- name: Display patch prerequisites check
+  debug:
+    msg: "{{ showroom_prereq_debug.stdout_lines | default(['no output']) }}"
+  ignore_errors: true
+
+# ==============================================================================
 # Patch Showroom deployment - single strategic merge patch by container name
 # This is resilient to container order changes in the showroom deployer
 # ==============================================================================
 - name: Patch Showroom deployment (env vars, volumes, mounts) in a single patch
   kubernetes.core.k8s:
-    state: present
+    state: patched
     definition:
       apiVersion: apps/v1
       kind: Deployment
@@ -1249,9 +1338,43 @@
               - configMapRef:
                   name: workshop-vars
               volumeMounts:
-              - name: showroom
+              - name: showroom-files
                 mountPath: /showroom
                 readOnly: true
+
+- name: DEBUG - Showroom Deployment structure after patching
+  shell: |
+    echo "=== POST-PATCH DEPLOYMENT STATE ==="
+    echo ""
+    echo "=== CONTAINERS (should include original + patched) ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{range .spec.template.spec.containers[*]}container: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    echo ""
+    echo "=== VOLUMES (should include originals + antora-cache + npm-cache) ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{range .spec.template.spec.volumes[*]}volume: {.name}{"\n"}{end}' 2>&1 || true
+    echo ""
+    echo "=== CONTAINER VOLUME MOUNTS (verify merge, not replace) ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .volumeMounts}}`}}  mount: {{`{{.name}}`}} -> {{`{{.mountPath}}`}}{{`{{if .subPath}}`}} (subPath: {{`{{.subPath}}`}}){{`{{end}}`}}{{`{{if .readOnly}}`}} [readOnly]{{`{{end}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    echo ""
+    echo "=== ENVFROM (should show workshop-vars on nginx, content, wetty) ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o go-template='{{`{{range .spec.template.spec.containers}}`}}container: {{`{{.name}}`}}{{`{{"\n"}}`}}{{`{{range .envFrom}}`}}  envFrom: configMapRef={{`{{.configMapRef.name}}`}}{{`{{"\n"}}`}}{{`{{end}}`}}{{`{{end}}`}}' 2>&1 || true
+    echo ""
+    echo "=== INIT CONTAINERS (should be unchanged) ==="
+    oc get deployment showroom -n {{ showroom_namespace }} \
+      -o jsonpath='{range .spec.template.spec.initContainers[*]}initContainer: {.name}  image: {.image}{"\n"}{end}' 2>&1 || true
+    echo ""
+    echo "=== POD STATUS (new pod rolling out) ==="
+    oc get pods -n {{ showroom_namespace }} -o wide 2>&1 || true
+  register: showroom_post_patch_debug
+  ignore_errors: true
+
+- name: Display Showroom post-patch structure
+  debug:
+    msg: "{{ showroom_post_patch_debug.stdout_lines | default(['no output']) }}"
+  ignore_errors: true
 
 - name: Wait for Showroom deployment to roll out after patching
   kubernetes.core.k8s_info:
