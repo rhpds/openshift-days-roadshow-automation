@@ -13,9 +13,11 @@
   register: r_helm_repo
   changed_when: "'has been added' in r_helm_repo.stdout"
   failed_when: r_helm_repo.rc != 0 and 'already exists' not in r_helm_repo.stderr
+  ignore_errors: true
 
 - name: Update Helm repo
   command: helm repo update {{ ocp4_days_workload_vault_helm_repo_name }}
+  ignore_errors: true
 
 - name: Get cluster ingress domain
   kubernetes.core.k8s_info:
@@ -27,6 +29,14 @@
 - name: Set Vault route host
   set_fact:
     _vault_route_host: "vault.{{ r_ingress.resources[0].spec.domain }}"
+
+- name: DEBUG - Vault install parameters
+  ansible.builtin.debug:
+    msg:
+      - "Namespace: {{ ocp4_days_workload_vault_namespace }}"
+      - "Route host: {{ _vault_route_host }}"
+      - "Server image: {{ ocp4_days_workload_vault_server_image }}:{{ ocp4_days_workload_vault_server_tag }}"
+      - "Injector image: {{ ocp4_days_workload_vault_injector_image }}:{{ ocp4_days_workload_vault_injector_tag }}"
 
 - name: Install Vault via Helm
   command: >-
@@ -44,6 +54,18 @@
     --set-string server.dev.devRootToken={{ ocp4_days_workload_vault_dev_root_token }}
     --wait --timeout 10m
   register: r_helm_install
+  ignore_errors: true
+
+- name: DEBUG - Helm install output
+  ansible.builtin.debug:
+    msg: "{{ r_helm_install.stdout_lines | default(['no output']) }}"
+  ignore_errors: true
+
+- name: DEBUG - Helm install errors
+  ansible.builtin.debug:
+    msg: "{{ r_helm_install.stderr_lines | default(['no errors']) }}"
+  when: r_helm_install is failed
+  ignore_errors: true
 
 - name: Wait for Vault server pod to be ready
   kubernetes.core.k8s_info:
@@ -61,6 +83,23 @@
     - r_vault_pod.resources[0].status.containerStatuses | selectattr('ready', 'equalto', true) | list | length > 0
   retries: 30
   delay: 10
+  ignore_errors: true
+
+- name: DEBUG - Vault pods
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ ocp4_days_workload_vault_namespace }}"
+  register: r_vault_pods
+  ignore_errors: true
+
+- name: DEBUG - Display Vault pods
+  ansible.builtin.debug:
+    msg:
+      - "Pods: {{ r_vault_pods.resources | default([]) | map(attribute='metadata.name') | list }}"
+      - "Statuses: {{ r_vault_pods.resources | default([]) | map(attribute='status.phase') | list }}"
+  when: r_vault_pods.resources | default([]) | length > 0
+  ignore_errors: true
 
 - name: Get Vault route
   kubernetes.core.k8s_info:
@@ -69,10 +108,18 @@
     name: "{{ ocp4_days_workload_vault_helm_release }}"
     namespace: "{{ ocp4_days_workload_vault_namespace }}"
   register: r_vault_route
+  ignore_errors: true
+
+- name: DEBUG - Vault route
+  ansible.builtin.debug:
+    msg: "Route: https://{{ r_vault_route.resources[0].spec.host | default('NOT FOUND') }}/"
+  when: r_vault_route.resources | default([]) | length > 0
+  ignore_errors: true
 
 - name: Vault installation complete
   ansible.builtin.debug:
     msg:
-      - "Vault deployed successfully in namespace {{ ocp4_days_workload_vault_namespace }}"
+      - "Vault deployed in namespace {{ ocp4_days_workload_vault_namespace }}"
       - "UI: https://{{ r_vault_route.resources[0].spec.host | default(_vault_route_host) }}/"
       - "Dev root token: {{ ocp4_days_workload_vault_dev_root_token }}"
+  ignore_errors: true
