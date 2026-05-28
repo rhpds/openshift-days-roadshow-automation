@@ -20,24 +20,42 @@
 # refresh periodically, leaving stale copies on every node.
 # ==============================================================================
 
-- name: Build catalog sources patch
+- name: Build catalog sources disable list
   set_fact:
-    _catalog_sources_patch: "{{ ocp4_workload_cluster_cleanup_disable_catalogs | map('regex_replace', '^(.*)$', '{\"name\":\"\\1\",\"disabled\":true}') | list }}"
-  ignore_errors: true
+    _catalog_disable_list: >-
+      {{ ocp4_workload_cluster_cleanup_disable_catalogs
+         | map('regex_replace', '^(.*)$', '{"name": "\1", "disabled": true}')
+         | map('from_json') | list }}
 
 - name: Disable unused default catalog sources
-  shell: >-
-    oc patch operatorhub cluster --type merge
-    -p '{"spec":{"sources":[{{ _catalog_sources_patch | join(",") }}]}}'
+  kubernetes.core.k8s:
+    api_version: config.openshift.io/v1
+    kind: OperatorHub
+    name: cluster
+    state: patched
+    definition:
+      spec:
+        sources: "{{ _catalog_disable_list }}"
   ignore_errors: true
 
 - name: Wait for disabled catalog source pods to terminate
-  shell: |
-    for catalog in {{ ocp4_workload_cluster_cleanup_disable_catalogs | join(' ') }}; do
-      echo "Disabling ${catalog}..."
-      timeout 60 bash -c "while oc get pods -n openshift-marketplace -l olm.catalogOperator.version --no-headers 2>/dev/null | grep -q ${catalog}; do sleep 5; done" || true
-    done
-    echo "Done"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: openshift-marketplace
+    label_selectors:
+      - "olm.catalogOperator.version"
+  register: r_catalog_pods
+  vars:
+    _disabled_pattern: "{{ ocp4_workload_cluster_cleanup_disable_catalogs | join('|') }}"
+    _active_pods: >-
+      {{ r_catalog_pods.resources | default([])
+         | selectattr('status.phase', 'equalto', 'Running')
+         | selectattr('metadata.name', 'search', _disabled_pattern)
+         | list }}
+  retries: 12
+  delay: 5
+  until: _active_pods | length == 0
   ignore_errors: true
 
 # ==============================================================================
@@ -45,6 +63,12 @@
 # crictl rmi --prune only removes images not referenced by any running
 # container, so this is safe to run at any point during deployment.
 # ==============================================================================
+
+- name: Check if oc CLI is configured
+  command: oc whoami
+  register: r_oc_check
+  ignore_errors: true
+  changed_when: false
 
 - name: Get list of cluster nodes
   kubernetes.core.k8s_info:
@@ -54,6 +78,9 @@
   ignore_errors: true
 
 - name: Prune unused container images on each node
+  when:
+    - r_oc_check is succeeded
+    - r_nodes is succeeded
   shell: |
     DISK_BEFORE=$(oc debug node/{{ item }} -- chroot /host df -h /var 2>/dev/null | tail -1)
     PRUNE_OUTPUT=$(oc debug node/{{ item }} -- chroot /host crictl rmi --prune 2>&1)
@@ -69,7 +96,6 @@
     label: "{{ item }}"
   register: r_image_prune
   ignore_errors: true
-  when: r_nodes is succeeded
 
 - name: Display image prune results
   debug:
