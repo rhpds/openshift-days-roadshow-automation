@@ -62,7 +62,7 @@
     kind: Deployment
     namespace: "{{ ocp4_days_workload_ztwim_namespace }}"
     label_selectors:
-      - "app.kubernetes.io/name=zero-trust-workload-identity-manager"
+      - "name=zero-trust-workload-identity-manager"
   register: r_ztwim_deployment
   until:
     - r_ztwim_deployment.resources | length > 0
