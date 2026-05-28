@@ -423,6 +423,67 @@
     msg: "{{ debug_subscriptions.stdout_lines }}"
   when: oc_whoami_check.rc == 0
 
+# ==============================================================================
+# PRE-CREATE SNAPSHOT CATALOGSOURCES WITH extractContent
+# The install_operator role creates CatalogSources from a template that doesn't
+# include grpcPodConfig. Without extractContent, the catalog pod runs the full
+# 1.7GB index image monolithically — parsing takes ~100s and regularly exceeds
+# the startup probe threshold (100s), causing the pod to restart indefinitely.
+# With extractContent, an init container extracts the catalog and a lightweight
+# opm server starts in ~10s. Pre-creating here is safe because install_operator
+# uses kubernetes.core.k8s state:present (merge patch), which preserves fields
+# not in its template.
+# ==============================================================================
+
+- name: Ensure namespaces exist for snapshot CatalogSources
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ item }}"
+  loop:
+    - openshift-cnv
+    - metallb-system
+  loop_control:
+    label: "{{ item }}"
+  ignore_errors: true
+
+- name: Pre-create snapshot CatalogSources with extractContent
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: CatalogSource
+      metadata:
+        name: "{{ item.name }}"
+        namespace: "{{ item.namespace }}"
+      spec:
+        sourceType: grpc
+        image: "{{ ocp4_workload_catalogsource_image }}:{{ ocp4_workload_catalogsource_tag }}"
+        displayName: "{{ item.name }}"
+        publisher: Red Hat AgnosticD
+        priority: -500
+        grpcPodConfig:
+          extractContent:
+            cacheDir: /tmp/cache
+            catalogDir: /configs
+          memoryTarget: "30Mi"
+          securityContextConfig: restricted
+  loop:
+    - name: redhat-operators-snapshot-web-terminal
+      namespace: openshift-operators
+    - name: redhat-operators-snapshot-kubevirt
+      namespace: openshift-cnv
+    - name: redhat-operators-snapshot-mtv
+      namespace: metallb-system
+    - name: redhat-operators-snapshot-lightspeed
+      namespace: openshift-marketplace
+  loop_control:
+    label: "{{ item.name }}"
+  ignore_errors: true
+
 - name: DEBUG - All CatalogSources
   shell: |
     echo "=== CATALOG SOURCES ==="
