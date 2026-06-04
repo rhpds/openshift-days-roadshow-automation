@@ -54,7 +54,6 @@
     --set-string server.dev.devRootToken={{ ocp4_days_workload_vault_dev_root_token }}
     --wait --timeout 10m
   register: r_helm_install
-  ignore_errors: true
 
 - name: DEBUG - Helm install output
   ansible.builtin.debug:
@@ -83,7 +82,6 @@
     - r_vault_pod.resources[0].status.containerStatuses | selectattr('ready', 'equalto', true) | list | length > 0
   retries: 30
   delay: 10
-  ignore_errors: true
 
 - name: DEBUG - Vault pods
   kubernetes.core.k8s_info:
