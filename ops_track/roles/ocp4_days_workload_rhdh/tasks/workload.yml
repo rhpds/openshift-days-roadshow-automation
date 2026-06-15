@@ -317,10 +317,10 @@
       -n inventory-team 2>/dev/null
       -- /bin/sh -c "echo 'FATAL: Cannot connect to database at postgres.inventory-team:5432 - connection refused' && sleep 2 && exit 1" || true
 
-  - name: Label deployments for RHDH discovery
+  - name: Label deployments for RHDH discovery and Topology plugin
     shell: >-
       oc patch deployment {{ item.name }} -n {{ item.namespace }} --type=json
-      -p '[{"op":"add","path":"/spec/template/metadata/labels/backstage.io~1kubernetes-id","value":"{{ item.backstage_id }}"}]'
+      -p '[{"op":"add","path":"/spec/template/metadata/labels/backstage.io~1kubernetes-id","value":"{{ item.backstage_id }}"},{"op":"add","path":"/metadata/labels/backstage.io~1kubernetes-id","value":"{{ item.backstage_id }}"},{"op":"add","path":"/metadata/labels/app.kubernetes.io~1part-of","value":"{{ item.backstage_id }}"}]'
     loop:
       - { name: payments-api, namespace: payments-team, backstage_id: payments-platform }
       - { name: payments-processor, namespace: payments-team, backstage_id: payments-platform }
@@ -335,6 +335,26 @@
       - { name: weather-cache, namespace: ops-track-demo, backstage_id: weather-app }
       - { name: weather-frontend, namespace: ops-track-demo, backstage_id: weather-app }
       - { name: weather-proxy, namespace: ops-track-demo, backstage_id: weather-app }
+    loop_control:
+      label: "{{ item.name }}"
+    ignore_errors: true
+
+  - name: Create Services for Topology plugin
+    shell: oc expose deployment/{{ item.name }} --port=8080 -n {{ item.namespace }} 2>/dev/null || true
+    loop:
+      - { name: payments-api, namespace: payments-team }
+      - { name: payments-processor, namespace: payments-team }
+      - { name: payments-gateway, namespace: payments-team }
+      - { name: inventory-api, namespace: inventory-team }
+      - { name: inventory-worker, namespace: inventory-team }
+      - { name: inventory-db-sync, namespace: inventory-team }
+      - { name: inventory-db-migrator, namespace: inventory-team }
+      - { name: notification-service, namespace: platform-services }
+      - { name: weather-api, namespace: ops-track-demo }
+      - { name: weather-backend, namespace: ops-track-demo }
+      - { name: weather-cache, namespace: ops-track-demo }
+      - { name: weather-frontend, namespace: ops-track-demo }
+      - { name: weather-proxy, namespace: ops-track-demo }
     loop_control:
       label: "{{ item.name }}"
     ignore_errors: true
@@ -449,6 +469,7 @@
               annotations:
                 backstage.io/kubernetes-namespace: ops-track-demo
                 backstage.io/kubernetes-id: weather-app
+                backstage.io/kubernetes-label-selector: backstage.io/kubernetes-id=weather-app
               tags: [openshift, ops-track, httpd]
             spec:
               type: service
@@ -463,6 +484,7 @@
               annotations:
                 backstage.io/kubernetes-namespace: backup-demo
                 backstage.io/kubernetes-id: backup-demo-app
+                backstage.io/kubernetes-label-selector: backstage.io/kubernetes-id=backup-demo-app
               tags: [openshift, ops-track, oadp]
             spec:
               type: service
@@ -477,6 +499,7 @@
               annotations:
                 backstage.io/kubernetes-namespace: payments-team
                 backstage.io/kubernetes-id: payments-platform
+                backstage.io/kubernetes-label-selector: backstage.io/kubernetes-id=payments-platform
               tags: [openshift, payments, pci]
             spec:
               type: service
@@ -491,6 +514,7 @@
               annotations:
                 backstage.io/kubernetes-namespace: inventory-team
                 backstage.io/kubernetes-id: inventory-system
+                backstage.io/kubernetes-label-selector: backstage.io/kubernetes-id=inventory-system
               tags: [openshift, inventory, supply-chain]
             spec:
               type: service
@@ -505,6 +529,7 @@
               annotations:
                 backstage.io/kubernetes-namespace: platform-services
                 backstage.io/kubernetes-id: notification-service
+                backstage.io/kubernetes-label-selector: backstage.io/kubernetes-id=notification-service
               tags: [openshift, platform, notifications]
             spec:
               type: service
@@ -519,6 +544,7 @@
               annotations:
                 backstage.io/kubernetes-namespace: order-tracker
                 backstage.io/kubernetes-id: order-tracker
+                backstage.io/kubernetes-label-selector: backstage.io/kubernetes-id=order-tracker
               tags: [openshift, orders, pending-deployment]
             spec:
               type: service
