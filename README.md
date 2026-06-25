@@ -1,10 +1,10 @@
-# OpenShift Days Roadshow Automation
+# OpenShift Ops Day Roadshow Automation
 
-Ansible collections for OpenShift Days Workshop tracks.
+Ansible collections for OpenShift Ops Day Roadshow tracks.
 
 ## Collections
 
-- **ops_track** (`openshift_days.ops_track`) - Ops Track Workshop roles
+- **ops_track** (`openshift_days.ops_track`) - Ops Day Roadshow roles
 - **dev_track** (`openshift_days.dev_track`) - Dev Track Workshop roles
 
 ## Installation
