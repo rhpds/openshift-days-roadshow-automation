@@ -34,3 +34,5 @@ MODULE_ENABLE_OIDC={{ module_enable_oidc | default(true) | string | lower }}
 MODULE_ENABLE_OBSERVABILITY={{ module_enable_observability | default(true) | string | lower }}
 MODULE_ENABLE_PERFORMANCE={{ module_enable_performance | default(true) | string | lower }}
 MODULE_ENABLE_CLOUD_INFRA={{ module_enable_cloud_infra | default(true) | string | lower }}
+# Service URLs
+OLS_AZURE_URL={{ ocp4_workload_ols_llm_providers_url | default('https://llm-gpt4-lightspeed.openai.azure.com/') }}
