@@ -50,12 +50,10 @@
   ansible.builtin.unarchive:
     src: /tmp/hcp.tar.gz
     remote_src: true
-    dest: /usr/bin
+    dest: /usr/local/bin
     mode: "0775"
-    owner: root
-    group: root
   args:
-    creates: /usr/bin/hcp
+    creates: /usr/local/bin/hcp
 
 - name: Remove downloaded file
   ansible.builtin.file:
@@ -63,6 +61,6 @@
     path: /tmp/hcp.tar.gz
 
 - name: Setup HCP CLI bash completion
-  ansible.builtin.shell: "/usr/bin/hcp completion bash >/etc/bash_completion.d/hcp"
+  ansible.builtin.shell: "/usr/local/bin/hcp completion bash >/etc/bash_completion.d/hcp"
   args:
     creates: /etc/bash_completion.d/hcp
