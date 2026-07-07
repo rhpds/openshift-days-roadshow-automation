@@ -47,7 +47,6 @@
   delay: 10
 
 - name: Install HCP CLI on bastion
-  become: true
   ansible.builtin.unarchive:
     src: /tmp/hcp.tar.gz
     remote_src: true
@@ -64,7 +63,6 @@
     path: /tmp/hcp.tar.gz
 
 - name: Setup HCP CLI bash completion
-  become: true
   ansible.builtin.shell: "/usr/bin/hcp completion bash >/etc/bash_completion.d/hcp"
   args:
     creates: /etc/bash_completion.d/hcp
