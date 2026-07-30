@@ -1414,7 +1414,7 @@
                   name: workshop-vars
               resources:
                 limits:
-                  memory: 512Mi
+                  memory: 768Mi
                 requests:
                   memory: 256Mi
               volumeMounts:
@@ -1516,17 +1516,75 @@
     msg: "{{ inject_vars_result.stdout_lines }}"
   when: enable_workshop_cli_tools | default(true) | bool
 
+- name: DEBUG - Content container state before Antora build
+  shell: |
+    echo "=== Pod status ==="
+    oc get pods -n {{ showroom_namespace }} -l app.kubernetes.io/name=showroom -o wide
+    echo ""
+    echo "=== Content container resources ==="
+    oc get deployment showroom -n {{ showroom_namespace }} -o jsonpath='{.spec.template.spec.containers[?(@.name=="content")].resources}' | python3 -m json.tool 2>/dev/null || echo "no resources set"
+    echo ""
+    echo "=== Node memory pressure ==="
+    oc adm top nodes 2>/dev/null || echo "cannot get node metrics"
+    echo ""
+    echo "=== Content container previous logs (if any) ==="
+    oc logs deployment/showroom -n {{ showroom_namespace }} -c content --previous --tail=20 2>/dev/null || echo "no previous logs"
+    echo ""
+    echo "=== Disk space in content container ==="
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- df -h /showroom 2>/dev/null || echo "cannot check disk"
+    echo ""
+    echo "=== Antora files present ==="
+    oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- ls -la /showroom/repo/default-site.yml /showroom/repo/content/antora.yml 2>/dev/null || echo "files missing"
+  register: pre_build_debug
+  ignore_errors: true
+  when: enable_workshop_cli_tools | default(true) | bool
+
+- name: Display pre-build debug
+  debug:
+    msg: "{{ pre_build_debug.stdout_lines | default([]) }}"
+  when: enable_workshop_cli_tools | default(true) | bool
+
 - name: Rebuild Antora site with injected variables
   shell: |
     oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- bash -c '
-    cd /showroom/repo && npx antora default-site.yml'
+    cd /showroom/repo && npx antora default-site.yml 2>&1'
   register: antora_build_result
+  retries: 2
+  delay: 10
+  until: antora_build_result.rc == 0
   when: enable_workshop_cli_tools | default(true) | bool
 
 - name: Display Antora build output
   debug:
     msg: "{{ antora_build_result.stdout_lines | default([]) }}"
   when: enable_workshop_cli_tools | default(true) | bool
+
+- name: DEBUG - Content container state after Antora build failure
+  shell: |
+    echo "=== Pod status after build ==="
+    oc get pods -n {{ showroom_namespace }} -l app.kubernetes.io/name=showroom -o wide
+    echo ""
+    echo "=== Pod events (last 5 min) ==="
+    oc get events -n {{ showroom_namespace }} --sort-by='.lastTimestamp' --field-selector reason!=Pulled,reason!=Created,reason!=Started 2>/dev/null | tail -10
+    echo ""
+    echo "=== Content container logs (last 30 lines) ==="
+    oc logs deployment/showroom -n {{ showroom_namespace }} -c content --tail=30 2>/dev/null
+    echo ""
+    echo "=== Previous content container logs ==="
+    oc logs deployment/showroom -n {{ showroom_namespace }} -c content --previous --tail=30 2>/dev/null || echo "no previous logs"
+  register: post_build_debug
+  ignore_errors: true
+  when:
+  - enable_workshop_cli_tools | default(true) | bool
+  - antora_build_result is failed
+
+- name: Display post-build debug
+  debug:
+    msg: "{{ post_build_debug.stdout_lines | default([]) }}"
+  when:
+  - enable_workshop_cli_tools | default(true) | bool
+  - post_build_debug is defined
+  - post_build_debug.stdout_lines is defined
 
 - name: Copy built site to served location (preserve showroom panel app)
   shell: |
