@@ -1,5 +1,68 @@
 ---
 # ==============================================================================
+# Patch RHACS Central CR: set ephemeral-storage requests/limits on scanner-db
+# ==============================================================================
+# Problem:
+#   The upstream agnosticd.core_workloads.ocp4_workload_rhacs role's Central CR
+#   never sets spec.scanner.db.resources, so the RHACS Operator's chart default
+#   applies (CPU/memory only, no ephemeral-storage). scanner-db uses an emptyDir
+#   (no PVC option exists for it) and restores the product's bundled CVE
+#   vulnerability database on every startup, landing at ~8-9GB within minutes -
+#   with zero visibility into that for the scheduler. On a workshop cluster
+#   running every module's full stack concurrently, that's enough on its own to
+#   push a node over its ephemeral-storage eviction threshold and cause kubelet
+#   to evict unrelated pods on that node (observed: it evicted openshift-lightspeed
+#   pods, not scanner-db itself).
+#
+# Fix:
+#   Patch spec.scanner.db.resources on the Central CR so the scheduler can
+#   actually account for scanner-db's real footprint when placing it, and so a
+#   future runaway is capped to evicting just this pod instead of the whole
+#   node. Values reflect real observed usage (~8.2-8.6GB) with headroom.
+# ==============================================================================
+
+- name: Patch Central CR to set scanner-db ephemeral-storage resources
+  kubernetes.core.k8s:
+    state: patched
+    api_version: platform.stackrox.io/v1alpha1
+    kind: Central
+    name: stackrox-central-services
+    namespace: stackrox
+    definition:
+      spec:
+        scanner:
+          db:
+            resources:
+              requests:
+                cpu: 200m
+                memory: 512Mi
+                ephemeral-storage: 9Gi
+              limits:
+                cpu: "2"
+                memory: 4Gi
+                ephemeral-storage: 14Gi
+
+# Patching the CR causes the RHACS Operator to recreate the scanner-db pod
+# (Recreate strategy), which re-restores the bundled CVE vulnerability
+# database on startup - this takes 5-10 minutes. Wait for it to come back
+# healthy so a bad resource value fails this workload run loudly instead of
+# silently leaving scanner-db broken for the rest of provisioning.
+- name: Wait for scanner-db pod to be ready after resource patch
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: stackrox
+    label_selectors:
+      - app=scanner-db
+  register: r_scanner_db_pod
+  until: >-
+    r_scanner_db_pod.resources | length > 0 and
+    r_scanner_db_pod.resources[0].status.phase == 'Running' and
+    r_scanner_db_pod.resources[0].status.containerStatuses[0].ready
+  retries: 40
+  delay: 15
+
+# ==============================================================================
 # Patch RHACS Central route: passthrough → reencrypt for Showroom iframe
 # ==============================================================================
 # Problem:
