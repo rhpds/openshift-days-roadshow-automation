@@ -63,6 +63,76 @@
   delay: 15
 
 # ==============================================================================
+# Patch RHACS Central CR: reduce CPU requests/limits on Scanner V4 components
+# ==============================================================================
+# Problem:
+#   The upstream agnosticd.core_workloads.ocp4_workload_rhacs role does not
+#   set spec.scannerV4.{indexer,matcher,db}.resources, so the RHACS Operator's
+#   chart defaults apply. Those defaults request 1500m CPU (indexer, x2
+#   replicas), 500m CPU (matcher, x2 replicas) and 1000m CPU (db) - 5 full
+#   cores requested for this stack alone. Live measurement on a running
+#   workshop cluster showed actual usage of 2-152m CPU across all five pods
+#   combined, meaning the requests are the single largest CPU over-request
+#   found across the whole catalog item.
+#
+# Fix:
+#   Patch CPU requests/limits down to reflect real usage with headroom.
+#   Memory is intentionally left untouched: scanner-db's actual memory usage
+#   (~6.15Gi) is close to its chart-default request (4Gi) and comfortably
+#   under its limit (8Gi), so there is no memory waste to reclaim here and
+#   cutting it would risk an OOM kill.
+# ==============================================================================
+
+- name: Patch Central CR to reduce Scanner V4 CPU requests/limits
+  kubernetes.core.k8s:
+    state: patched
+    api_version: platform.stackrox.io/v1alpha1
+    kind: Central
+    name: stackrox-central-services
+    namespace: stackrox
+    definition:
+      spec:
+        scannerV4:
+          indexer:
+            resources:
+              requests:
+                cpu: 100m
+              limits:
+                cpu: "1"
+          matcher:
+            resources:
+              requests:
+                cpu: 100m
+              limits:
+                cpu: 500m
+          db:
+            resources:
+              requests:
+                cpu: 100m
+              limits:
+                cpu: "1"
+
+# Patching the CR causes the RHACS Operator to roll the affected Scanner V4
+# deployments. Unlike the scanner-db ephemeral-storage patch above, this is a
+# CPU-only change (no emptyDir restore, no OOM risk), so pods come back
+# quickly - but wait anyway so a bad value fails this workload run loudly
+# instead of silently leaving Scanner V4 degraded for the rest of provisioning.
+- name: Wait for Scanner V4 pods to be ready after resource patch
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: stackrox
+    label_selectors:
+      - "app in (scanner-v4-indexer, scanner-v4-matcher, scanner-v4-db)"
+  register: r_scanner_v4_pods
+  until: >-
+    r_scanner_v4_pods.resources | length > 0 and
+    r_scanner_v4_pods.resources | rejectattr('status.phase', 'equalto', 'Running') | list | length == 0 and
+    r_scanner_v4_pods.resources | map(attribute='status.containerStatuses') | map('first') | rejectattr('ready') | list | length == 0
+  retries: 40
+  delay: 15
+
+# ==============================================================================
 # Patch RHACS Central route: passthrough → reencrypt for Showroom iframe
 # ==============================================================================
 # Problem:
