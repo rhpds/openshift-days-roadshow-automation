@@ -61,4 +61,4 @@ ocp4_workload_openshift_virtualization_catalogsource_name: redhat-operators-snap
 ocp4_workload_openshift_virtualization_catalog_snapshot_image: quay.io/gpte-devops-automation/olm_snapshot_redhat_catalog
 
 # Catalog snapshot image tag
-ocp4_workload_openshift_virtualization_catalog_snapshot_image_tag: "v4.19_2025_10_06"
+ocp4_workload_openshift_virtualization_catalog_snapshot_image_tag: "v4.19_2025_10_20"
