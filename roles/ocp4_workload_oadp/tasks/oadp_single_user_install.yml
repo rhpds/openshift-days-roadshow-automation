@@ -25,6 +25,13 @@
             sourceType: grpc
             image: "{{ ocp4_workload_oadp_catalog_snapshot_image }}:{{ ocp4_workload_oadp_catalog_snapshot_image_tag }}"
             displayName: OADP Catalog Snapshot
+            priority: -500
+            grpcPodConfig:
+              extractContent:
+                cacheDir: /tmp/cache
+                catalogDir: /configs
+              memoryTarget: "30Mi"
+              securityContextConfig: restricted
 
     - name: Wait for OADP CatalogSource to report READY
       kubernetes.core.k8s_info:
@@ -33,8 +40,8 @@
         name: "{{ ocp4_workload_oadp_catalogsource_name }}"
         namespace: openshift-adp
       register: r_oadp_catalogsource
-      retries: 30
-      delay: 10
+      retries: 60
+      delay: 15
       until:
         - r_oadp_catalogsource.resources | length > 0
         - r_oadp_catalogsource.resources[0].status is defined
