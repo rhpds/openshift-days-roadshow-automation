@@ -44,6 +44,46 @@
         name: "{{ ocp4_days_workload_rhdh_instance_namespace }}"
 
 # Install the RHDH Operator
+- name: Create snapshot CatalogSource for RHDH
+  when: ocp4_days_workload_rhdh_use_catalog_snapshot | bool
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: CatalogSource
+      metadata:
+        name: "{{ ocp4_days_workload_rhdh_catalogsource_name }}"
+        namespace: openshift-marketplace
+      spec:
+        sourceType: grpc
+        image: "{{ ocp4_days_workload_rhdh_catalog_snapshot_image }}:{{ ocp4_days_workload_rhdh_catalog_snapshot_image_tag }}"
+        displayName: "{{ ocp4_days_workload_rhdh_catalogsource_name }}"
+        publisher: Red Hat AgnosticD
+        priority: -500
+        grpcPodConfig:
+          extractContent:
+            cacheDir: /tmp/cache
+            catalogDir: /configs
+          memoryTarget: "30Mi"
+          securityContextConfig: restricted
+  register: r_rhdh_catalogsource
+  retries: 6
+  delay: 5
+  until: r_rhdh_catalogsource is success
+
+- name: Wait for RHDH snapshot CatalogSource to report READY
+  when: ocp4_days_workload_rhdh_use_catalog_snapshot | bool
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: CatalogSource
+    name: "{{ ocp4_days_workload_rhdh_catalogsource_name }}"
+    namespace: openshift-marketplace
+  register: r_rhdh_catalogsource_status
+  retries: 60
+  delay: 15
+  until: >-
+    r_rhdh_catalogsource_status.resources[0].status.connectionState.lastObservedState | default('') == 'READY'
+
 - name: Install Red Hat Developer Hub Operator
   ansible.builtin.include_role:
     name: install_operator

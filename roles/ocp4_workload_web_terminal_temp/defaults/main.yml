@@ -40,4 +40,4 @@ ocp4_workload_web_terminal_catalogsource_name: redhat-operators-snapshot-web-ter
 ocp4_workload_web_terminal_catalog_snapshot_image: quay.io/gpte-devops-automation/olm_snapshot_redhat_catalog
 
 # Catalog snapshot image tag
-ocp4_workload_web_terminal_catalog_snapshot_image_tag: v4.19_2025_07_21
+ocp4_workload_web_terminal_catalog_snapshot_image_tag: v4.19_2025_10_20

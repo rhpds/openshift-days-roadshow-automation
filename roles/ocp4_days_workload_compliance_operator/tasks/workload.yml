@@ -37,6 +37,57 @@
       if r_existing_subscription.resources | length > 0
       else 'No existing installation found — installing via install_operator role' }}
 
+# Create the snapshot CatalogSource ourselves, with extractContent, before calling
+# install_operator. install_operator's own bare CatalogSource template has no
+# extractContent, so its registry pod parses the full ~1.7GB index image
+# monolithically (~100s), which can exceed the startup probe threshold and
+# restart-loop on compact/small clusters, failing InstallPlan creation.
+- name: Create snapshot CatalogSource for Compliance Operator
+  when:
+    - r_existing_subscription.resources | length == 0
+    - ocp4_days_workload_compliance_operator_use_catalog_snapshot | bool
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: operators.coreos.com/v1alpha1
+      kind: CatalogSource
+      metadata:
+        name: "{{ ocp4_days_workload_compliance_operator_catalogsource_name }}"
+        namespace: openshift-marketplace
+      spec:
+        sourceType: grpc
+        image: >-
+          {{ ocp4_days_workload_compliance_operator_catalog_snapshot_image }}:{{
+          ocp4_days_workload_compliance_operator_catalog_snapshot_image_tag }}
+        displayName: "{{ ocp4_days_workload_compliance_operator_catalogsource_name }}"
+        publisher: Red Hat AgnosticD
+        priority: -500
+        grpcPodConfig:
+          extractContent:
+            cacheDir: /tmp/cache
+            catalogDir: /configs
+          memoryTarget: "30Mi"
+          securityContextConfig: restricted
+  register: r_compliance_catalogsource
+  retries: 6
+  delay: 5
+  until: r_compliance_catalogsource is success
+
+- name: Wait for Compliance Operator snapshot CatalogSource to report READY
+  when:
+    - r_existing_subscription.resources | length == 0
+    - ocp4_days_workload_compliance_operator_use_catalog_snapshot | bool
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: CatalogSource
+    name: "{{ ocp4_days_workload_compliance_operator_catalogsource_name }}"
+    namespace: openshift-marketplace
+  register: r_compliance_catalogsource_status
+  retries: 60
+  delay: 15
+  until: >-
+    r_compliance_catalogsource_status.resources[0].status.connectionState.lastObservedState | default('') == 'READY'
+
 # Only call install_operator if the subscription doesn't already exist.
 # When ACM is enabled, prepare_hcp creates the subscription via OperatorPolicy.
 # Calling install_operator on top of that creates a duplicate OperatorGroup,
@@ -51,8 +102,9 @@
     install_operator_namespace: "{{ ocp4_days_workload_compliance_operator_namespace }}"
     install_operator_channel: "{{ ocp4_days_workload_compliance_operator_channel }}"
     install_operator_automatic_install_plan_approval: "{{ ocp4_days_workload_compliance_operator_automatic_install_plan_approval }}"
-    install_operator_use_catalog_snapshot: "{{ ocp4_days_workload_compliance_operator_use_catalog_snapshot }}"
+    install_operator_catalogsource_setup: "{{ ocp4_days_workload_compliance_operator_use_catalog_snapshot }}"
     install_operator_catalogsource_name: "{{ ocp4_days_workload_compliance_operator_catalogsource_name }}"
+    install_operator_catalogsource_namespace: openshift-marketplace
     install_operator_catalogsource_image: "{{ ocp4_days_workload_compliance_operator_catalog_snapshot_image }}"
     install_operator_catalogsource_image_tag: "{{ ocp4_days_workload_compliance_operator_catalog_snapshot_image_tag }}"
     # On busy compact clusters the CSV can take >15 min to reach Succeeded,

@@ -424,7 +424,7 @@
   when: oc_whoami_check.rc == 0
 
 # ==============================================================================
-# PRE-CREATE SNAPSHOT CATALOGSOURCES WITH extractContent
+# PRE-CREATE SNAPSHOT CATALOGSOURCE WITH extractContent
 # The install_operator role creates CatalogSources from a template that doesn't
 # include grpcPodConfig. Without extractContent, the catalog pod runs the full
 # 1.7GB index image monolithically — parsing takes ~100s and regularly exceeds
@@ -433,36 +433,29 @@
 # opm server starts in ~10s. Pre-creating here is safe because install_operator
 # uses kubernetes.core.k8s state:present (merge patch), which preserves fields
 # not in its template.
+#
+# The web-terminal, kubevirt, and mtv snapshot CatalogSources are created
+# lazily instead, immediately before their respective operator install
+# (ocp4_workload_web_terminal_temp, ocp4_workload_openshift_virtualization_temp,
+# ocp4_workload_metallb_temp) so those registry pods don't sit idle consuming
+# node resources for the entire rest of a long run on compact/small clusters.
+# The lightspeed snapshot is a shared fallback catalog consumed by several
+# operators outside this repo, so it's left pre-created here.
 # ==============================================================================
 
-- name: Ensure namespaces exist for snapshot CatalogSources
-  kubernetes.core.k8s:
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Namespace
-      metadata:
-        name: "{{ item }}"
-  loop:
-    - openshift-cnv
-    - metallb-system
-  loop_control:
-    label: "{{ item }}"
-  ignore_errors: true
-
-- name: Pre-create snapshot CatalogSources with extractContent
+- name: Pre-create lightspeed snapshot CatalogSource with extractContent
   kubernetes.core.k8s:
     state: present
     definition:
       apiVersion: operators.coreos.com/v1alpha1
       kind: CatalogSource
       metadata:
-        name: "{{ item.name }}"
-        namespace: "{{ item.namespace }}"
+        name: redhat-operators-snapshot-lightspeed
+        namespace: openshift-marketplace
       spec:
         sourceType: grpc
         image: "{{ ocp4_workload_catalogsource_image }}:{{ ocp4_workload_catalogsource_tag }}"
-        displayName: "{{ item.name }}"
+        displayName: redhat-operators-snapshot-lightspeed
         publisher: Red Hat AgnosticD
         priority: -500
         grpcPodConfig:
@@ -471,17 +464,6 @@
             catalogDir: /configs
           memoryTarget: "30Mi"
           securityContextConfig: restricted
-  loop:
-    - name: redhat-operators-snapshot-web-terminal
-      namespace: openshift-operators
-    - name: redhat-operators-snapshot-kubevirt
-      namespace: openshift-cnv
-    - name: redhat-operators-snapshot-mtv
-      namespace: metallb-system
-    - name: redhat-operators-snapshot-lightspeed
-      namespace: openshift-marketplace
-  loop_control:
-    label: "{{ item.name }}"
   ignore_errors: true
 
 - name: DEBUG - All CatalogSources

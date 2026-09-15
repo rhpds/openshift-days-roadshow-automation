@@ -35,6 +35,56 @@
       ansible.builtin.set_fact:
         _ocp4_workload_openshift_gitops_domain: "{{ openshift_cluster_ingress_domain }}"
 
+    - name: Ensure openshift-gitops-operator namespace exists for snapshot CatalogSource
+      when: ocp4_workload_openshift_gitops_use_catalog_snapshot | default(false) | bool
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: openshift-gitops-operator
+
+    - name: Create snapshot CatalogSource for OpenShift GitOps
+      when: ocp4_workload_openshift_gitops_use_catalog_snapshot | default(false) | bool
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: operators.coreos.com/v1alpha1
+          kind: CatalogSource
+          metadata:
+            name: "{{ ocp4_workload_openshift_gitops_catalogsource_name }}"
+            namespace: openshift-gitops-operator
+          spec:
+            sourceType: grpc
+            image: "{{ ocp4_workload_openshift_gitops_catalog_snapshot_image }}:{{ ocp4_workload_openshift_gitops_catalog_snapshot_image_tag }}"
+            displayName: "{{ ocp4_workload_openshift_gitops_catalogsource_name }}"
+            publisher: Red Hat AgnosticD
+            priority: -500
+            grpcPodConfig:
+              extractContent:
+                cacheDir: /tmp/cache
+                catalogDir: /configs
+              memoryTarget: "30Mi"
+              securityContextConfig: restricted
+      register: r_gitops_catalogsource
+      retries: 6
+      delay: 5
+      until: r_gitops_catalogsource is success
+
+    - name: Wait for OpenShift GitOps snapshot CatalogSource to report READY
+      when: ocp4_workload_openshift_gitops_use_catalog_snapshot | default(false) | bool
+      kubernetes.core.k8s_info:
+        api_version: operators.coreos.com/v1alpha1
+        kind: CatalogSource
+        name: "{{ ocp4_workload_openshift_gitops_catalogsource_name }}"
+        namespace: openshift-gitops-operator
+      register: r_gitops_catalogsource_status
+      retries: 60
+      delay: 15
+      until: >-
+        r_gitops_catalogsource_status.resources[0].status.connectionState.lastObservedState | default('') == 'READY'
+
     - name: Install OpenShift GitOps operator
       ansible.builtin.include_role:
         name: install_operator
