@@ -81,7 +81,7 @@
     until: >-
       ((r_noobaa_backingstore.resources | default([]) | first | default({})).status.phase | default(''))
       in ['Ready', 'Rejected']
-    retries: 60
+    retries: 120
     delay: 10
 
   - name: Require the default NooBaa BackingStore to be Ready
@@ -109,7 +109,7 @@
     until: >-
       ((r_observer_bucket_claim.resources | default([]) | first | default({})).status.phase | default(''))
       in ['Bound', 'Failed']
-    retries: 60
+    retries: 120
     delay: 10
 
   - name: Require the observability ObjectBucketClaim to be Bound
@@ -131,8 +131,8 @@
       name: observer-bucket
       namespace: "{{ ocp4_workload_acm_multicluster_observability_namespace }}"
     register: r_bucket_cm
-    retries: 30
-    delay: 5
+    retries: 120
+    delay: 10
     until: r_bucket_cm.resources | default([]) | length > 0
 
   - name: Get Bucket information part 2
@@ -142,8 +142,8 @@
       name: observer-bucket
       namespace: "{{ ocp4_workload_acm_multicluster_observability_namespace }}"
     register: r_bucket_secret
-    retries: 30
-    delay: 5
+    retries: 120
+    delay: 10
     until: r_bucket_secret.resources | default([]) | length > 0
 
   rescue:
