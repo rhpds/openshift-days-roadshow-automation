@@ -1499,40 +1499,12 @@
   shell: |
     oc rollout status deployment/showroom -n {{ showroom_namespace }} --timeout=300s
 
-- name: Inject workshop environment variables into antora.yml
-  shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- bash -c '
-    if [ -x /showroom/repo/.workshop/inject-env-vars.sh ]; then
-      /showroom/repo/.workshop/inject-env-vars.sh
-    else
-      echo "ERROR: injection script not found or not executable"
-      exit 1
-    fi'
-  register: inject_vars_result
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Display variable injection output
-  debug:
-    msg: "{{ inject_vars_result.stdout_lines }}"
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Rebuild Antora site with injected variables
-  shell: |
-    oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- bash -c '
-    cd /showroom/repo && npx antora default-site.yml'
-  register: antora_build_result
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Display Antora build output
-  debug:
-    msg: "{{ antora_build_result.stdout_lines | default([]) }}"
-  when: enable_workshop_cli_tools | default(true) | bool
-
-- name: Publish Antora output and verify Showroom variables
+- name: Prepare and publish Showroom content
   when: enable_workshop_cli_tools | default(true) | bool
   block:
-  - name: Wait for the API and control plane to be stable before updating Showroom
+  - name: Wait for the API and control plane to be stable before Showroom commands
     shell: |
+      oc get --raw=/readyz >/dev/null || exit 1
       available=$(oc get co kube-apiserver -o jsonpath='{.status.conditions[?(@.type=="Available")].status}') || exit 1
       progressing=$(oc get co kube-apiserver -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}') || exit 1
       degraded=$(oc get co kube-apiserver -o jsonpath='{.status.conditions[?(@.type=="Degraded")].status}') || exit 1
@@ -1542,6 +1514,37 @@
     delay: 15
     until: api_stable_result.rc == 0
     changed_when: false
+
+  - name: Inject workshop environment variables into antora.yml
+    shell: |
+      oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- bash -c '
+      if [ -x /showroom/repo/.workshop/inject-env-vars.sh ]; then
+        /showroom/repo/.workshop/inject-env-vars.sh
+      else
+        echo "ERROR: injection script not found or not executable"
+        exit 1
+      fi'
+    register: inject_vars_result
+    retries: 20
+    delay: 15
+    until: inject_vars_result.rc == 0
+
+  - name: Display variable injection output
+    debug:
+      msg: "{{ inject_vars_result.stdout_lines }}"
+
+  - name: Rebuild Antora site with injected variables
+    shell: |
+      oc exec deployment/showroom -n {{ showroom_namespace }} -c content -- bash -c '
+      cd /showroom/repo && npx antora default-site.yml'
+    register: antora_build_result
+    retries: 20
+    delay: 15
+    until: antora_build_result.rc == 0
+
+  - name: Display Antora build output
+    debug:
+      msg: "{{ antora_build_result.stdout_lines | default([]) }}"
 
   - name: Copy the site, resolve DOMAIN, and verify rendered workshop variables
     shell: |
@@ -1570,12 +1573,12 @@
           echo "Copied Antora output, resolved DOMAIN, and verified workshop variables"
         '
     register: showroom_publish_result
-    retries: 5
+    retries: 20
     delay: 15
     until: showroom_publish_result.rc == 0
 
   rescue:
-  - name: Collect Showroom and API state after a failed site update
+  - name: Collect Showroom and API state after a failed content update
     shell: |
       echo "=== kube-apiserver ClusterOperator ==="
       oc get co kube-apiserver -o wide 2>&1 || true
@@ -1593,10 +1596,10 @@
     debug:
       msg: "{{ showroom_publish_diagnostics.stdout_lines | default(['No diagnostic output']) }}"
 
-  - name: Fail with the original Showroom update error
+  - name: Fail with the original Showroom content update error
     fail:
       msg: >-
-        Showroom site publication failed at
+        Showroom content update failed at
         {{ ansible_failed_task.name | default('an unknown task') }}.
         {{ ansible_failed_result.msg | default(ansible_failed_result.stderr | default('See the failed task output above.')) }}
 
