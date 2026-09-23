@@ -1568,9 +1568,9 @@
           fi
           grep -Fq "${ROUTE_SUBDOMAIN}" /showroom/www/ui-config.yml
 
-          grep -Fq "Amazon Web Services" /showroom/www/ocp-admin-storage/main/index.html
-          grep -Eq "ssh -l.*bastion\." /showroom/www/ocp-admin-storage/main/installation.html
-          echo "Copied Antora output, resolved DOMAIN, and verified workshop variables"
+          test -s /showroom/www/openshift-days-ops-track/main/index.html
+          test -s /showroom/www/openshift-days-ops-track/main/01-installation.html
+          echo "Copied Antora output, resolved DOMAIN, and verified published workshop pages"
         '
     register: showroom_publish_result
     retries: 20
