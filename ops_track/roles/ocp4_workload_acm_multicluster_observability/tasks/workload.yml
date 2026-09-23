@@ -54,51 +54,128 @@
   retries: 30
   delay: 30
 
-- name: Check NooBaa is ready
-  k8s_info:
-    validate_certs: false
-    api_version: noobaa.io/v1alpha1
-    kind: NooBaa
-    name: noobaa
-    namespace: openshift-storage
-  register: r_noobaa
-  until:
-    - r_noobaa.resources.0.status.phase == "Ready"
-  retries: 30
-  delay: 30
+- name: Provision the ACM observability bucket
+  block:
+  - name: Check NooBaa is ready
+    k8s_info:
+      validate_certs: false
+      api_version: noobaa.io/v1alpha1
+      kind: NooBaa
+      name: noobaa
+      namespace: openshift-storage
+    register: r_noobaa
+    until: >-
+      (r_noobaa.resources | default([]) | length > 0) and
+      ((r_noobaa.resources | default([]) | first | default({})).status.phase | default('')) == 'Ready'
+    retries: 30
+    delay: 30
 
-- name: Create Object Bucket Claim
-  k8s:
-    state: present
-    definition: "{{ lookup('template','./templates/obc-observability.yml.j2') | from_yaml }}"
+  - name: Wait for the default NooBaa BackingStore to reach a terminal state
+    k8s_info:
+      validate_certs: false
+      api_version: noobaa.io/v1alpha1
+      kind: BackingStore
+      name: noobaa-default-backing-store
+      namespace: openshift-storage
+    register: r_noobaa_backingstore
+    until: >-
+      ((r_noobaa_backingstore.resources | default([]) | first | default({})).status.phase | default(''))
+      in ['Ready', 'Rejected']
+    retries: 120
+    delay: 10
 
-- name: Get Bucket information part 1
-  k8s_info:
-    api_version: v1
-    kind: ConfigMap
-    name: observer-bucket
-    namespace: "{{ ocp4_workload_acm_multicluster_observability_namespace }}"
-  register: r_bucket_cm
-  retries: 120
-  delay: 10
-  until:
-    - r_bucket_cm is defined
-    - r_bucket_cm.resources is defined
-    - r_bucket_cm.resources | length > 0
+  - name: Require the default NooBaa BackingStore to be Ready
+    assert:
+      that:
+      - (r_noobaa_backingstore.resources | default([]) | length > 0)
+      - ((r_noobaa_backingstore.resources | default([]) | first | default({})).status.phase | default('')) == 'Ready'
+      fail_msg: >-
+        NooBaa BackingStore noobaa-default-backing-store did not become Ready.
+        Current phase:
+        {{ (r_noobaa_backingstore.resources | default([]) | first | default({})).status.phase | default('missing') }}.
 
-- name: Get Bucket information part 2
-  k8s_info:
-    api_version: v1
-    kind: Secret
-    name: observer-bucket
-    namespace: "{{ ocp4_workload_acm_multicluster_observability_namespace }}"
-  register: r_bucket_secret
-  retries: 120
-  delay: 10
-  until:
-    - r_bucket_secret is defined
-    - r_bucket_secret.resources is defined
-    - r_bucket_secret.resources | length > 0
+  - name: Create Object Bucket Claim
+    k8s:
+      state: present
+      definition: "{{ lookup('template','./templates/obc-observability.yml.j2') | from_yaml }}"
+
+  - name: Wait for the observability ObjectBucketClaim to reach a terminal state
+    k8s_info:
+      api_version: objectbucket.io/v1alpha1
+      kind: ObjectBucketClaim
+      name: observer-bucket
+      namespace: "{{ ocp4_workload_acm_multicluster_observability_namespace }}"
+    register: r_observer_bucket_claim
+    until: >-
+      ((r_observer_bucket_claim.resources | default([]) | first | default({})).status.phase | default(''))
+      in ['Bound', 'Failed']
+    retries: 120
+    delay: 10
+
+  - name: Require the observability ObjectBucketClaim to be Bound
+    assert:
+      that:
+      - (r_observer_bucket_claim.resources | default([]) | length > 0)
+      - ((r_observer_bucket_claim.resources | default([]) | first | default({})).status.phase | default('')) == 'Bound'
+      fail_msg: >-
+        ObjectBucketClaim observer-bucket did not become Bound.
+        Current phase:
+        {{ (r_observer_bucket_claim.resources | default([]) | first | default({})).status.phase | default('missing') }}.
+        Message:
+        {{ (r_observer_bucket_claim.resources | default([]) | first | default({})).status.message | default('none') }}.
+
+  - name: Get Bucket information part 1
+    k8s_info:
+      api_version: v1
+      kind: ConfigMap
+      name: observer-bucket
+      namespace: "{{ ocp4_workload_acm_multicluster_observability_namespace }}"
+    register: r_bucket_cm
+    retries: 120
+    delay: 10
+    until: r_bucket_cm.resources | default([]) | length > 0
+
+  - name: Get Bucket information part 2
+    k8s_info:
+      api_version: v1
+      kind: Secret
+      name: observer-bucket
+      namespace: "{{ ocp4_workload_acm_multicluster_observability_namespace }}"
+    register: r_bucket_secret
+    retries: 120
+    delay: 10
+    until: r_bucket_secret.resources | default([]) | length > 0
+
+  rescue:
+  - name: Collect NooBaa and ObjectBucketClaim status after bucket setup failure
+    shell: |
+      echo "=== NooBaa status ==="
+      oc get noobaa noobaa -n openshift-storage -o custom-columns=NAME:.metadata.name,PHASE:.status.phase 2>&1 || true
+      echo "=== Default BackingStore status ==="
+      oc get backingstore noobaa-default-backing-store -n openshift-storage -o custom-columns=NAME:.metadata.name,PHASE:.status.phase 2>&1 || true
+      echo "=== Observability ObjectBucketClaim ==="
+      oc describe objectbucketclaim observer-bucket -n {{ ocp4_workload_acm_multicluster_observability_namespace }} 2>&1 || true
+      echo "=== NooBaa pod readiness and restarts ==="
+      oc get pods -n openshift-storage -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,READY:.status.containerStatuses[*].ready,RESTARTS:.status.containerStatuses[*].restartCount,LAST-REASON:.status.containerStatuses[*].lastState.terminated.reason,LAST-EXIT:.status.containerStatuses[*].lastState.terminated.exitCode 2>&1 || true
+      echo "=== Recent storage events ==="
+      oc get events -n openshift-storage --sort-by=.lastTimestamp 2>&1 | tail -20 || true
+      echo "=== Recent observability namespace events ==="
+      oc get events -n {{ ocp4_workload_acm_multicluster_observability_namespace }} --sort-by=.lastTimestamp 2>&1 | tail -20 || true
+    register: r_bucket_setup_diagnostics
+    changed_when: false
+    failed_when: false
+
+  - name: Display bucket setup diagnostics
+    debug:
+      msg: "{{ r_bucket_setup_diagnostics.stdout_lines | default(['No diagnostic output']) }}"
+
+  - name: Fail with the original bucket setup error
+    fail:
+      msg: >-
+        ACM observability bucket setup failed at
+        {{ ansible_failed_task.name | default('an unknown task') }}.
+        {{ ansible_failed_result.msg | default(ansible_failed_result.stderr | default('See the failed task output above.')) }}
+        See the NooBaa and ObjectBucketClaim diagnostics above.
 
 - name: Create Thanos Object Storage Secret
   k8s:
