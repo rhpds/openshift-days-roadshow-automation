@@ -70,7 +70,7 @@
     retries: 30
     delay: 30
 
-  - name: Wait for the default NooBaa BackingStore to reach a terminal state
+  - name: Wait for the default NooBaa BackingStore to become Ready
     k8s_info:
       validate_certs: false
       api_version: noobaa.io/v1alpha1
@@ -80,7 +80,7 @@
     register: r_noobaa_backingstore
     until: >-
       ((r_noobaa_backingstore.resources | default([]) | first | default({})).status.phase | default(''))
-      in ['Ready', 'Rejected']
+      == 'Ready'
     retries: 120
     delay: 10
 
