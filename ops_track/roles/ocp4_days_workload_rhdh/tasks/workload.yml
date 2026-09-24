@@ -118,6 +118,7 @@
             providers:
               guest:
                 dangerouslyAllowOutsideDevelopment: true
+                userEntityRef: user:default/guest
   when: ocp4_days_workload_rhdh_enable_guest_auth | bool
 
 # Create the Backstage CR
@@ -462,6 +463,15 @@
               children: []
             ---
             apiVersion: backstage.io/v1alpha1
+            kind: User
+            metadata:
+              name: guest
+            spec:
+              profile:
+                displayName: Guest
+              memberOf: []
+            ---
+            apiVersion: backstage.io/v1alpha1
             kind: Component
             metadata:
               name: weather-app
@@ -684,6 +694,7 @@
               providers:
                 guest:
                   dangerouslyAllowOutsideDevelopment: true
+                  userEntityRef: user:default/guest
             backend:
               reading:
                 allow:
@@ -707,7 +718,7 @@
                 - type: file
                   target: /opt/app-root/src/catalog-info.yaml
                   rules:
-                    - allow: [Component, Group, Template]
+                    - allow: [Component, Group, Template, User]
 
   # --- Patch Backstage CR to wire everything up ---
   - name: Patch Backstage CR with plugins, secrets, and catalog
